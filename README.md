@@ -66,7 +66,7 @@ You can do this to have the AI answer some questions with a little more accuracy
 "GptAssistantIntro": "You are an assistant on the Rust game server called Rust Haus. The Rust Haus server wipes every Thursday around 2pm CST or if forced. Discord server at https://discord.gg/EQNPBxdjRu, website is https://rust.haus, Twitter is @HausRust81322.",
 ```
 
-While in game chat the AI will trigger when a question is asked in chat that ends in a qestion mark. 
+While in game chat the AI will trigger when a question is asked in chat that ends in a question mark. 
 
 Currently the question structure is like this: 
 `who|what|when|where|why|how|is|are|am|do|does|did|can|could|will|would|should|which|whom "rest of the question" ?`
