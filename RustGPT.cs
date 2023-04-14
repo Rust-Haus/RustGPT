@@ -11,7 +11,7 @@ using System.Text.RegularExpressions;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust GPT", "GooGurt", "1.5.0")]
+    [Info("Rust GPT", "GooGurt", "1.5.1")]
     [Description("Ask GPT questions from the game chat and get text-based answers.")]
 
     class RustGPT : RustPlugin
@@ -20,7 +20,7 @@ namespace Oxide.Plugins
 
         private string OpenAIApiKey;
         private string GptAssistantIntro;
-        private const string CurrentPluginVersion = "1.5.0";
+        private const string CurrentPluginVersion = "1.5.1";
         private Dictionary<string, DateTime> cooldowns; 
         private TimeSpan CooldownDuration = TimeSpan.FromSeconds(30);
 
