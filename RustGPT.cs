@@ -198,20 +198,6 @@ namespace Oxide.Plugins
             }
         }
 
-        private void GiveItemToPlayer(BasePlayer player, string itemName, int amount = 1)
-        {
-            ItemDefinition itemDefinition = ItemManager.FindItemDefinition(itemName);
-            if (itemDefinition != null)
-            {
-                player.inventory.GiveItem(ItemManager.CreateByItemID(itemDefinition.itemid, amount));
-                Puts($"Gave {amount} {itemName} to {player.displayName}");
-            }
-            else
-            {
-                Puts($"Invalid item: {itemName}");
-            }
-        }
-
         #endregion
 
         #region Chat Handling
