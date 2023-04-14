@@ -262,7 +262,8 @@ namespace Oxide.Plugins
             }
 
             var playerId = player.userID.ToString();
-            if (cooldowns.TryGetValue(playerId, out var lastRequestTime))
+            var lastRequestTime = (DateTime)default;
+            if (cooldowns.TryGetValue(playerId, out lastRequestTime))
             {
                 var timeElapsed = DateTime.UtcNow - lastRequestTime;
                 if (timeElapsed < CooldownDuration)
@@ -290,3 +291,4 @@ namespace Oxide.Plugins
 
     }
 }
+
