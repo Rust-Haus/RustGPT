@@ -1,280 +1,214 @@
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using Oxide.Core.Libraries.Covalence;
 using Oxide.Core.Plugins;
 using System;
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Text;
-using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Net;
 using System.Text.RegularExpressions;
+using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust GPT", "GooGurt", "1.5.2")]
-    [Description("Ask GPT questions from the game chat and get text-based answers.")]
-
-    class RustGPT : RustPlugin
+    [Info("RustGPT", "GooGurt", "1.6.0")]
+    [Description("Ask questions to RustGPT from the game chat")]
+    class RustGPT : CovalencePlugin
     {
-        #region Variables
+        private string ApiKey => _config.OpenAI_Api_Key.ApiKey;
+        private string ApiUrl => _config.OutboundAPIUrl.ApiUrl; 
+        private const string QuestionPattern = @"!gpt";
+        private readonly Regex _questionRegex = new Regex(QuestionPattern, RegexOptions.IgnoreCase);
 
-        private string OpenAIApiKey;
-        private string GptAssistantIntro;
-        private const string CurrentPluginVersion = "1.5.2";
-        private Dictionary<string, DateTime> cooldowns; 
-        private TimeSpan CooldownDuration = TimeSpan.FromSeconds(30);
-
-        #endregion
-
-        #region Configuration
+        private PluginConfig _config;
 
         protected override void LoadDefaultConfig()
         {
-            // Check if the configuration file needs to be updated
-            if (Config["PluginVersion"] == null || Config["PluginVersion"].ToString() != CurrentPluginVersion)
-            {
-                // Update the configuration with new values
-                Config["PluginVersion"] = CurrentPluginVersion;
-                Config["OpenAIApiKey"] = "your_openai_api_key";
-                Config["GptAssistantIntro"] = "You are a snarky assistant on a Rust game server. Your answers are short. You never say you are sorry.";
-                Config["CooldownTimeInSeconds"] = 30;
-                // Save the updated configuration
-                SaveConfig();
-            }
+            Puts("Creating a new configuration file.");
+            _config = new PluginConfig();
+            Config.WriteObject(_config, true);
         }
-
-        #endregion
-
-        #region Initialization
-
-        private async void Init()
+        
+        protected override void LoadConfig()
         {
-            OpenAIApiKey = Config["OpenAIApiKey"].ToString();
-            GptAssistantIntro = Config["GptAssistantIntro"].ToString();
-            int cooldownTimeInSeconds = Convert.ToInt32(Config["CooldownTimeInSeconds"]);
-            CooldownDuration = TimeSpan.FromSeconds(cooldownTimeInSeconds);
-            cooldowns = new Dictionary<string, DateTime>();
-
-            if (string.IsNullOrEmpty(OpenAIApiKey) || OpenAIApiKey == "your_openai_api_key")
-            {
-                PrintWarning("Please configure the plugin with the required OpenAI API key.");
-                return;
-            }
+            base.LoadConfig();
 
             try
             {
-                await TestApiKey();
-                Puts("OpenAI API key is valid.");
+                _config = Config.ReadObject<PluginConfig>();
             }
             catch (Exception ex)
             {
-                PrintWarning($"Error testing OpenAI API key: {ex.Message}");
+                Puts($"Error deserializing config: {ex.Message}");
+                LoadDefaultConfig();
+                return;
+            }
+
+            if (_config == null || _config.OpenAI_Api_Key.ApiKey == "your-api-key-here")
+            {
+                NotifyAdminsOfApiKeyRequirement();
+            }
+            else
+            {
+                Puts("Configuration file loaded.");
             }
         }
 
-        #endregion
-
-        #region Methods
-
-        private void BroadcastAnswerInChunks(string question, string answer)
+        private void Init()
         {
-            const int chunkSize = 128;
-            string[] messages = { question, answer };
-
-            foreach (string message in messages)
-            {
-                int numberOfChunks = (message.Length + chunkSize - 1) / chunkSize;
-
-                for (int i = 0; i < numberOfChunks; i++)
-                {
-                    int startIndex = i * chunkSize;
-                    int endIndex = Math.Min(startIndex + chunkSize, message.Length);
-                    string chunk = message.Substring(startIndex, endIndex - startIndex);
-                    Server.Broadcast(chunk);
-                }
-            }
+            permission.RegisterPermission("RustGPT.use", this);
         }
 
-        private async Task<string> GetGptAnswer(string question)
+
+        [Command("askgpt")]
+        private void AskGPTCommand(IPlayer player, string command, string[] args)
         {
-            Puts($"Trying to get an answer... : {question}");
-            JObject chatMessage = new JObject
+            if (!permission.UserHasPermission(player.Id, "RustGPT.use"))
             {
-                { "role", "system" },
-                { "content", GptAssistantIntro },
-            };
-
-            JArray messages = new JArray
-            {
-                chatMessage,
-                new JObject
-                {
-                    { "role", "user" },
-                    { "content", question }
-                }
-            };
-
-            using (var client = new HttpClient())
-            {
-                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", OpenAIApiKey);
-                client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-                var requestBody = new
-                {
-                    model = "gpt-3.5-turbo",
-                    messages = messages,
-                    max_tokens = 50,
-                    n = 1,
-                    temperature = 0.7,
-                    stop = "Answer:"
-                };
-
-                string jsonContent = JsonConvert.SerializeObject(requestBody);
-                StringContent content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-
-                HttpResponseMessage response = await client.PostAsync("https://api.openai.com/v1/chat/completions", content);
-                string jsonResponse = await response.Content.ReadAsStringAsync();
-                Puts($"This could be a mess of a response : {jsonResponse}");
-                if (!response.IsSuccessStatusCode)
-                {
-                    PrintWarning($"Error fetching GPT answer: {response.StatusCode} {response.ReasonPhrase}");
-                    PrintWarning($"Response content: {jsonResponse}");
-                    throw new Exception($"Error fetching GPT answer: {response.StatusCode} {response.ReasonPhrase}");
-                }
-
-                JObject json = JObject.Parse(jsonResponse);
-                JArray choices = (JArray)json["choices"];
-                JObject choice = (JObject)choices[0];
-                string answer = choice["message"]["content"].ToString();
-                return answer;
-            }
-        }
-
-        private async Task TestApiKey()
-        {
-            JObject chatMessage = new JObject
-            {
-                { "role", "system" },
-                { "content", "You are a helpful assistant." }
-            };
-
-            JArray messages = new JArray
-            {
-                chatMessage,
-                new JObject
-                {
-                    { "role", "user" },
-                    { "content", "What is the capital of France?" }
-                }
-            };
-
-            using (var client = new HttpClient())
-            {
-                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", OpenAIApiKey);
-                client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-                var requestBody = new
-            {
-                model = "gpt-3.5-turbo",
-                messages = messages,
-                max_tokens = 5,
-                n = 1,
-                stop = "Answer:"
-            };
-
-            string jsonContent = JsonConvert.SerializeObject(requestBody);
-            StringContent content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-
-            HttpResponseMessage response = await client.PostAsync("https://api.openai.com/v1/chat/completions", content);
-            string jsonResponse = await response.Content.ReadAsStringAsync();
-
-            if (!response.IsSuccessStatusCode)
-            {
-                PrintWarning($"Error testing OpenAI API key: {response.StatusCode} {response.ReasonPhrase}");
-                PrintWarning($"Response content: {jsonResponse}");
-                throw new Exception($"Error testing OpenAI API key: {response.StatusCode} {response.ReasonPhrase}");
-            }
-
-            }
-        }
-
-        #endregion
-
-        #region Chat Handling
-        readonly Dictionary<string, string> lastMessage = new Dictionary<string, string>();
-
-        void OnPlayerChat(BasePlayer player, string message)
-        {
-            if (player == null || string.IsNullOrEmpty(message)) return;
-
-            // Chat questions need to have one of these words in the text string and end with a question mark for it to work. 
-            string questionPattern = @"\b(who|what|when|where|why|how|is|are|am|do|does|did|can|could|will|would|should|which|whom)\b.*\?$";
-            bool isQuestion = Regex.IsMatch(message, questionPattern, RegexOptions.IgnoreCase);
-
-            if (isQuestion)
-            {
-                try
-                {
-                    GetGptAnswer(message).ContinueWith(task =>
-                    {
-                        string answer = task.Result;
-                        BroadcastAnswerInChunks($"[RustGPT] {player.displayName}: {message}", $"[RustGPT] Answer: {answer}");
-                    });
-                }
-                catch (Exception ex)
-                {
-                    Puts($"Error processing the request: {ex.Message}");
-                }
-            }
-        }
-
-        #endregion
-
-        #region Commands
-
-        [ChatCommand("askgpt")]
-        private async void AskGptCommand(BasePlayer player, string command, string[] args)
-        {
-            if (string.IsNullOrEmpty(OpenAIApiKey) || OpenAIApiKey == "your_openai_api_key")
-            {
-                player.ChatMessage("The Rust GPT plugin is not configured correctly. Please contact the server administrator.");
+                player.Reply("You don't have permission to use this command.");
                 return;
             }
 
             if (args.Length == 0)
             {
-                player.ChatMessage("Usage: /askgpt [your question]");
+                player.Reply("Usage: /askgpt <your question>");
                 return;
             }
 
-            var playerId = player.userID.ToString();
-            var lastRequestTime = (DateTime)default;
-            if (cooldowns.TryGetValue(playerId, out lastRequestTime))
+            string question = string.Join(" ", args);
+            AskRustGPT(question, response => player.Reply($"{_config.ResponsePrefix} {response}"));
+        }
+
+        private void AskRustGPT(string question, Action<string> callback)
+        {
+            WebClient webClient = new WebClient();
+            webClient.Headers.Add("Content-Type", "application/json");
+            webClient.Headers.Add("Authorization", $"Bearer {ApiKey}");
+
+            string payload = JsonConvert.SerializeObject(new
             {
-                var timeElapsed = DateTime.UtcNow - lastRequestTime;
-                if (timeElapsed < CooldownDuration)
+                model = _config.AIResponseParameters.ChatModel,
+                prompt = $"Human: {question}\nAI:",
+                temperature = _config.AIResponseParameters.Temperature,
+                max_tokens = _config.AIResponseParameters.MaxTokens,
+                top_p = 1,
+                frequency_penalty = _config.AIResponseParameters.FrequencyPenalty,
+                presence_penalty = _config.AIResponseParameters.PresencePenalty,
+                stop = new[] { " Human:", " AI:" }
+            });
+
+            webClient.UploadStringCompleted += (sender, e) =>
+            {
+                if (e.Error != null)
                 {
-                    player.ChatMessage($"You can use /askgpt again in {CooldownDuration - timeElapsed}.");
+                    Puts($"Error: {e.Error.Message}");
                     return;
                 }
+
+                RustGPTResponse response = JsonConvert.DeserializeObject<RustGPTResponse>(e.Result);
+                string answer = response.choices[0].text.Trim();
+                callback(answer);
+            };
+
+            webClient.UploadStringAsync(new Uri(ApiUrl), "POST", payload);
+        }
+
+        private class RustGPTResponse
+        {
+            public List<Choice> choices { get; set; }
+        }
+
+        private class Choice
+        {
+            public string text { get; set; }
+        }
+
+        private object OnUserChat(IPlayer player, string message)
+        {
+            if (permission.UserHasPermission(player.Id, "RustGPT.use") && _questionRegex.IsMatch(message))
+            {
+                AskRustGPT(message, response => player.Reply($"{_config.ResponsePrefix} {response}"));
             }
 
-            string question = string.Join(" ", args);
+            return null;
+        }
 
-            try
+        // Used to notify users who have the RustGPT.use permission when the API key is not set in the configuration file.
+        private void NotifyAdminsOfApiKeyRequirement()
+        {
+            foreach (IPlayer player in players.Connected) 
             {
-                string answer = await GetGptAnswer(question);
-                BroadcastAnswerInChunks($"[RustGPT] {player.displayName}: {question}", $"[RustGPT] {answer}");
-                cooldowns[playerId] = DateTime.UtcNow;
-            }
-            catch (Exception ex)
-            {
-                Puts($"Error processing the request: {ex.Message}");
+                if (permission.UserHasPermission(player.Id, "RustGPT.use"))
+                {
+                    player.Message("The RustGPT API key is not set in the configuration file. Please update the 'your-api-key-here' value with a valid API key to use the RustGPT plugin.");
+                }
             }
         }
 
-         #endregion
+        private class OpenAI_Api_KeyConfig
+        {
+            [JsonProperty("API Key")]
+            public string ApiKey { get; set; }
 
+            public OpenAI_Api_KeyConfig()
+            {
+                ApiKey = "your-api-key-here";
+            }
+        }
+
+        private class OutboundAPIUrlConfig
+        {
+            [JsonProperty("API URL")]
+            public string ApiUrl { get; set; }
+
+            public OutboundAPIUrlConfig()
+            {
+                ApiUrl = "https://api.openai.com/v1/completions";
+            }
+        }
+
+        private class AIResponseParametersConfig
+        {
+            [JsonProperty("Model")]
+            public string ChatModel { get; set; }
+
+            [JsonProperty("Temperature")]
+            public double Temperature { get; set; }
+
+            [JsonProperty("Max Tokens")]
+            public int MaxTokens { get; set; }
+
+            [JsonProperty("Presence Penalty")]
+            public double PresencePenalty { get; set; }
+
+            [JsonProperty("Frequency Penalty")]
+            public double FrequencyPenalty { get; set; }
+
+            public AIResponseParametersConfig()
+            {
+                ChatModel = "text-davinci-003";
+                Temperature = 0.9;
+                MaxTokens = 150;
+                PresencePenalty = 0.6;
+                FrequencyPenalty = 0;
+            }
+        }
+
+        private class PluginConfig
+        {
+            public OpenAI_Api_KeyConfig OpenAI_Api_Key { get; set; }
+            public OutboundAPIUrlConfig OutboundAPIUrl { get; set; }
+            public AIResponseParametersConfig AIResponseParameters { get; set; }
+            
+            [JsonProperty("Response Prefix")]
+            public string ResponsePrefix { get; set; }
+
+
+            public PluginConfig()
+            {
+                OpenAI_Api_Key = new OpenAI_Api_KeyConfig();
+                AIResponseParameters = new AIResponseParametersConfig();
+                OutboundAPIUrl = new OutboundAPIUrlConfig();
+                ResponsePrefix = "[RustGPT]";
+            }
+        }
     }
 }
-

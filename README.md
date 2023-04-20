@@ -7,7 +7,7 @@ Are you sick of playing Rust like a normal person? Yeah, us too. That's why we c
   
 
 
-## Features 🔥
+# Features 🔥
 
 
 - Ask GPT questions directly from the game chat
@@ -20,13 +20,13 @@ Are you sick of playing Rust like a normal person? Yeah, us too. That's why we c
 Contributions are always welcome! Reach out to Goo on Rust Haus' [discord](https://discord.gg/EQNPBxdjRu) if you want. Otherwise do a pull request and get crackin.
 
 
-## Plugin Variables
+# Plugin Variables
 
 To run this project, you will need to get yourself a fancy [OpenAI API key](https://platform.openai.com/account/api-keys).
 
 
 
-## Installation 🛠️
+# Installation 🛠️
 
 
 Copy the plugin `RustGPT.cs` into your Carbon or Oxide plugins folder.
@@ -35,30 +35,58 @@ When the plugin is first loaded it will generate a configuration file and the se
 
 Configure the plugin in the `RustGPT.json` file located in you Oxide or Carbon `configs` folder. 
 
-As of ver 1.5 the config file looks like this:
+As of ver 1.6 the config file looks like this:
 
 ```json
 {
-"CooldownTimeInSeconds": 30,
-"GptAssistantIntro": "You are an assistant on a Rust game server.",
-"OpenAIApiKey": "<YOUR API KEY>",
-"PluginVersion": "1.5.0"
+  "AIResponseParameters": {
+    "Max Tokens": 150,
+    "Presence Penalty": 0.6,
+    "Temperature": 0.9
+  },
+  "SecretApiCode": {
+    "API Key": "your-api-key-here"
+  }
 }
 ```    
 
-To quickly get movin and groovin just paste in your OpenAI API key and restart the plugin.
+To get movin and groovin just paste in your OpenAI API key and restart the plugin.
 
-Hop in to the console and restart the plugin. 
+- Hop in to the console and restart the plugin. 
 
-Using Oxide? Do this `o.reload RustGPT.cs`
+- Using Oxide? Do this `o.reload RustGPT.cs`
 
-Using Carbon? Do this `c.reload RustGPT.cs`
+- Using Carbon? Do this `c.reload RustGPT.cs`
 
-Do yourself a favor and make a local copy of your `RustGPT.json` file in case something goes wonky in future updates. 
+**Do yourself a favor and make a local copy of your `RustGPT.json` file in case something goes wonky in future updates.**
 
+## Permissions added in 1.6
+Since cooldowns have been removed for...reasons, a permission has been added so that your entire server doesnt kill your OpenAI account.
 
+In console for oxide:
 
-## Usage/Examples
+` o.grant user <player_name_or_steam_id> ChatGPT.use `
+
+In console for Carbon:
+
+` c.grant user <player_name_or_steam_id> ChatGPT.use `
+
+# Configuration
+
+## "AIResponseParameters" Explained
+
+Since these parameters are part of the OpenAI API call payload, these are the links to the official documentation.
+
+["Max Tokens"](https://platform.openai.com/docs/api-reference/completions/create#completions/create-max_tokens) 
+
+["Presence Penalty"](https://platform.openai.com/docs/api-reference/completions/create#completions/create-presence_penalty)
+
+["Temperature"](https://platform.openai.com/docs/api-reference/completions/create#completions/create-temperature)
+
+["Model"](https://platform.openai.com/docs/api-reference/completions/create#completions/create-model)
+ 
+
+# Usage/Examples
 
 You can do this to have the AI answer some questions with a little more accuracy. 
 
