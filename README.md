@@ -118,7 +118,7 @@ Currently the default question structure is like this:
 
 This is an old method to trigger commands in rust. Basically, any chat message that contains the text "!gpt" will send that chat message through the API and trigger a response. You can edit this in the configuration file. Since this is capable of accepting regex expressions you can get crazy with it. For example:
 
-`"Question Pattern": "\b(who|what|when|where|why|how|is|are|am|do|does|did|can|could|will|would|should|which|whom)\b.*\?$"`
+`"Question Pattern": "(who|what|when|where|why|how|is|are|am|do|does|did|can|could|will|would|should|which|whom).*?$"`
 
 This will look for a chat message that contains one of the various keywords and ends with a question mark.
 
