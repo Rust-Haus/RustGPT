@@ -15,9 +15,7 @@ namespace Oxide.Plugins
     {
         private string ApiKey => _config.OpenAI_Api_Key.ApiKey;
         private string ApiUrl => _config.OutboundAPIUrl.ApiUrl; 
-        private const string QuestionPattern = @"!gpt";
-        private readonly Regex _questionRegex = new Regex(QuestionPattern, RegexOptions.IgnoreCase);
-
+        private Regex _questionRegex;
         private PluginConfig _config;
 
         protected override void LoadDefaultConfig()
@@ -25,6 +23,8 @@ namespace Oxide.Plugins
             Puts("Creating a new configuration file.");
             _config = new PluginConfig();
             Config.WriteObject(_config, true);
+            _questionRegex = new Regex(_config.QuestionPattern, RegexOptions.IgnoreCase);
+
         }
         
         protected override void LoadConfig()
@@ -50,13 +50,15 @@ namespace Oxide.Plugins
             {
                 Puts("Configuration file loaded.");
             }
+            
+            _questionRegex = new Regex(_config.QuestionPattern, RegexOptions.IgnoreCase);
+
         }
 
         private void Init()
         {
             permission.RegisterPermission("RustGPT.use", this);
         }
-
 
         [Command("askgpt")]
         private void AskGPTCommand(IPlayer player, string command, string[] args)
@@ -74,7 +76,8 @@ namespace Oxide.Plugins
             }
 
             string question = string.Join(" ", args);
-            AskRustGPT(question, response => player.Reply($"{_config.ResponsePrefix} {response}"));
+            string coloredPrefix = $"<color={_config.ResponsePrefixColor}>{_config.ResponsePrefix}</color>";
+            AskRustGPT(question, response => player.Reply($"{coloredPrefix} {response}"));
         }
 
         private void AskRustGPT(string question, Action<string> callback)
@@ -125,13 +128,13 @@ namespace Oxide.Plugins
         {
             if (permission.UserHasPermission(player.Id, "RustGPT.use") && _questionRegex.IsMatch(message))
             {
-                AskRustGPT(message, response => player.Reply($"{_config.ResponsePrefix} {response}"));
+                string coloredPrefix = $"<color={_config.ResponsePrefixColor}>{_config.ResponsePrefix}</color>";
+                AskRustGPT(message, response => player.Reply($"{coloredPrefix} {response}"));
             }
 
             return null;
         }
 
-        // Used to notify users who have the RustGPT.use permission when the API key is not set in the configuration file.
         private void NotifyAdminsOfApiKeyRequirement()
         {
             foreach (IPlayer player in players.Connected) 
@@ -201,6 +204,11 @@ namespace Oxide.Plugins
             [JsonProperty("Response Prefix")]
             public string ResponsePrefix { get; set; }
 
+            [JsonProperty("Question Pattern")]
+            public string QuestionPattern { get; set; }
+
+            [JsonProperty("Response Prefix Color")]
+            public string ResponsePrefixColor { get; set; }
 
             public PluginConfig()
             {
@@ -208,6 +216,9 @@ namespace Oxide.Plugins
                 AIResponseParameters = new AIResponseParametersConfig();
                 OutboundAPIUrl = new OutboundAPIUrlConfig();
                 ResponsePrefix = "[RustGPT]";
+                QuestionPattern = @"!gpt";
+                ResponsePrefixColor = "#55AAFF";
+
             }
         }
     }
