@@ -14,8 +14,9 @@ Are you sick of playing Rust like a normal person? Yeah, us too. That's why we c
 
 
 - Ask GPT questions directly from the game chat
+
 - Get text-based answers from GPT
-- Customizable cool down time
+<!-- - Customizable cool down time -->
 - Participate in the inevitable AI overlord takeover!
 
 
