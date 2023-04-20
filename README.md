@@ -1,5 +1,4 @@
-
-# Rust GPT Plugin 🤖
+# Rust GPT 🤖
 
   
 
