@@ -79,11 +79,11 @@ Since cool downs have been removed for...reasons, a permission has been added so
 
 In console for oxide:
 
-` o.grant user <player_name_or_steam_id> ChatGPT.use `
+` o.grant user <player_name_or_steam_id> RustGPT.use `
 
 In console for Carbon:
 
-` c.grant user <player_name_or_steam_id> ChatGPT.use `
+` c.grant user <player_name_or_steam_id> RustGPT.use `
 
 # Configuration
 
