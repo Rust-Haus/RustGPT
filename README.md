@@ -1,5 +1,4 @@
-
- Are you sick of playing Rust like a normal person? Yeah, us too. That's why we created the Rust GPT plugin, so you can chat with an AI while you wander aimlessly through the map, waiting to get shot out of nowhere. Who needs a game plan when you have an AI to talk to?
+Are you sick of playing Rust like a normal person? Yeah, us too. That's why we created the Rust GPT plugin, so you can chat with an AI while you wander aimlessly through the map, waiting to get shot out of nowhere. Who needs a game plan when you have an AI to talk to?
 
 ## **You should read this entire README if you are using this plugin for the first time.**
 
@@ -19,7 +18,7 @@
 
 # Contributing
 
-Contributions are always welcome! Reach out to Goo on Rust Haus' [discord](https://discord.gg/EQNPBxdjRu) if you want. Otherwise do a pull request and get crackin.
+Contributions are always welcome! Reach out to Goo on Rust Haus' [discord]() if you want. Otherwise do a pull request and get crackin.
 
 
 
@@ -43,7 +42,7 @@ As of ver 1.6.1 the config file looks like this:
 {
   "AIPromptParameters": {
     "System role": "You are a helpful assistant on Rust game server called Rust.Haus Testing Server.",
-    "User Server Details": "Server wipes Thursdays at 2pm CST. Blueprints are wiped on forced wipes only. Gather rate is 5X. Available commands available by using /info. Server admin is Goo. The discord link is https://discord.gg/EQNPBxdjRu"
+    "User Server Details": "Server wipes Thursdays at 2pm CST. Blueprints are wiped on forced wipes only. Gather rate is 5X. Available commands available by using /info. Server admin is Goo. The discord link is discord"
   },
   "AIResponseParameters": {
     "Frequency Penalty": 0.0,
@@ -108,11 +107,11 @@ These parameters are a way to give you AI a head start on some answers. This wil
 
 System Role is not always considered by the AI according to the OpenAI documentation. More info about this [here.](https://platform.openai.com/docs/guides/chat/introduction)
 
-`"User Server Details": "Server wipes Thursdays at 2pm CST. Blueprints are wiped on forced wipes only. Gather rate is 5X. Available commands available by using /info. Server admin is Goo. The discord link is https://discord.gg/EQNPBxdjRu"`
+`"User Server Details": "Server wipes Thursdays at 2pm CST. Blueprints are wiped on forced wipes only. Gather rate is 5X. Available commands available by using /info. Server admin is Goo. The discord link is discord"`
 
 ![Usage example](https://i.imgur.com/UXoLsb4.png)
 
-User Server Details is actually what you are programming the AI to think was a previous response to the player question "My name is <Player's Name>. Tell me about this server." Loading this answer with as much data about the server as possible to give quick access to the AI.  
+User Server Details is actually what you are programming the AI to think was a previous response to the player question "My name is `Player's Nam`. Tell me about this server." Loading this answer with as much data about the server as possible to give quick access to the AI.  
 
 ## Chat Cool Down
 
@@ -125,7 +124,7 @@ Setting this will try and prevent the API from being spammed into oblivion. Shou
 <!-- You can do this to have the AI answer some questions with a little more accuracy. 
 
 ```json
-"GptAssistantIntro": "You are an assistant on the Rust game server called Rust Haus. The Rust Haus server wipes every Thursday around 2pm CST or if forced. Discord server at https://discord.gg/EQNPBxdjRu, website is https://rust.haus, Twitter is @HausRust81322.",
+"GptAssistantIntro": "You are an assistant on the Rust game server called Rust Haus. The Rust Haus server wipes every Thursday around 2pm CST or if forced. Discord server at discord, website is https://rust.haus, Twitter is @HausRust81322.",
 ``` -->
 
 ## Question Patterns
@@ -239,14 +238,12 @@ namespace Oxide.Plugins
 
 I'm not associated in any way with OpenAI or Facepunch but feel free to tell them how cool I am. 
 
-Huge thanks to [Raul-Sorin Sorban](https://codefling.com/raul-sorin-sorban) for helping me getting this to work! He should be a co-author of the plugin but I am sparing him from the customer service requests. 😁 
+Huge thanks to Raul-Sorin Sorban for helping me getting this to work! He should be a co-author of the plugin but I am sparing him from the customer service requests. 😁 
 
 
 # Feedback
 
 `goo@rust.haus`
-
-[Rust Haus Discord](https://discord.gg/QXhG7KRH)
 
 [Github Discussions](https://github.com/Rust-Haus/RustGPT/discussions)
 
@@ -254,6 +251,5 @@ Huge thanks to [Raul-Sorin Sorban](https://codefling.com/raul-sorin-sorban) for 
 
 ## License
 
-[![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](https://choosealicense.com/licenses/mit/)
-
+MIT
 ![Cool down example](https://i.imgur.com/1cT2nGt.png)
