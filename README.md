@@ -1,9 +1,5 @@
-<<<<<<< HEAD
-# Rust GPT 🤖
-=======
 
  Are you sick of playing Rust like a normal person? Yeah, us too. That's why we created the Rust GPT plugin, so you can chat with an AI while you wander aimlessly through the map, waiting to get shot out of nowhere. Who needs a game plan when you have an AI to talk to?
->>>>>>> origin/stable
 
 ## **You should read this entire README if you are using this plugin for the first time.**
 
