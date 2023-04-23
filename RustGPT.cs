@@ -5,10 +5,11 @@ using System.Net;
 using System.Text.RegularExpressions;
 using Rust;
 using UnityEngine;
+using Newtonsoft.Json.Linq;
 
 namespace Oxide.Plugins
 {
-    [Info("RustGPT", "GooGurt", "1.6.1")]
+    [Info("RustGPT", "GooGurt", "1.6.2")]
     [Description("Players can use OpenAI's ChatGPT from the game chat")]
     class RustGPT : RustPlugin
     {
@@ -18,7 +19,7 @@ namespace Oxide.Plugins
         private string ApiUrl => _config.OutboundAPIUrl.ApiUrl;
         private Regex _questionRegex { get; set; }
         private PluginConfig _config { get; set; }
-        private const string PluginVersion = "1.6.1";
+        private const string PluginVersion = "1.6.2";
         private readonly Version _version = new Version(PluginVersion);
         private Dictionary<string, float> _lastUsageTime = new Dictionary<string, float>();
 
@@ -104,59 +105,14 @@ namespace Oxide.Plugins
                 {
                     Server.Broadcast($"{player.displayName} asked: {question}");
                     Server.Broadcast(formattedResponse);
-
                 }
                 else
                 {
                     player.ChatMessage($"You asked: {question}");
                     player.ChatMessage(formattedResponse);
                 }
-            }, _config.BroadcastResponse);
+            });
 
-        }
-
-        #endregion
-
-        #region API Response Handling
-        public class Message
-        {
-            public string Role { get; set; }
-            public string Content { get; set; }
-
-            public Message(string role, string content)
-            {
-                Role = role;
-                Content = content;
-            }
-        }
-
-        public class RustGPTResponse
-        {
-            public string id { get; set; }
-            public string object_type { get; set; }
-            public int created { get; set; }
-            public List<RustGPTChoice> choices { get; set; }
-            public RustGPTUsage usage { get; set; }
-        }
-
-        public class RustGPTChoice
-        {
-            public int index { get; set; }
-            public RustGPTMessage message { get; set; }
-            public string finish_reason { get; set; }
-        }
-
-        public class RustGPTMessage
-        {
-            public string role { get; set; }
-            public string content { get; set; }
-        }
-
-        public class RustGPTUsage
-        {
-            public int prompt_tokens { get; set; }
-            public int completion_tokens { get; set; }
-            public int total_tokens { get; set; }
         }
 
         #endregion
@@ -184,13 +140,14 @@ namespace Oxide.Plugins
                         {
                             player.ChatMessage(formattedResponse);
                         }
-                    }, _config.BroadcastResponse);
+                    });
                 });
             }
             return null;
         }
 
-        private void AskRustGPT(BasePlayer player, string question, Action<string> callback, bool broadcastResponse)
+
+        private void AskRustGPT(BasePlayer player, string question, Action<string> callback)
         {
             var webClient = new WebClient();
             webClient.Headers.Add("Content-Type", "application/json");
@@ -201,11 +158,11 @@ namespace Oxide.Plugins
                 model = "gpt-3.5-turbo",
                 messages = new[]
                 {
-            new { role = "system", content = $"{_config.AIPromptParameters.SystemRole}" },
-            new { role = "user", content = $"My name is {player.displayName} Tell me about this server." },
-            new { role = "assistant", content = $"{_config.AIPromptParameters.UserServerDetails}" },
-            new { role = "user", content = $"{question}" },
-        },
+                    new { role = "system", content = $"{_config.AIPromptParameters.SystemRole}" },
+                    new { role = "user", content = $"My name is {player.displayName} Tell me about this server." },
+                    new { role = "assistant", content = $"{_config.AIPromptParameters.UserServerDetails}" },
+                    new { role = "user", content = $"{question}" },
+                },
                 temperature = _config.AIResponseParameters.Temperature,
                 max_tokens = _config.AIResponseParameters.MaxTokens,
             });
@@ -219,54 +176,55 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var rustGPTResponse = JsonConvert.DeserializeObject<RustGPTResponse>(e.Result);
-                var answer = rustGPTResponse.choices[0].message.content.Trim();
+                JObject jsonResponse = JObject.Parse(e.Result);
+                string answer = jsonResponse["choices"][0]["message"]["content"].ToString().Trim();
                 callback(answer);
             };
 
             webClient.UploadStringAsync(new Uri(ApiUrl), "POST", payload);
         }
 
-        // ---------------------------------------------------------------------------------------------------------
-        //
-        //                  This will be used when oxide upgrades to C# 4.5 or higher
-        //
-        // ---------------------------------------------------------------------------------------------------------
-        //private void AskRustGPT(BasePlayer player, string question, Action<string> callback, bool broadcastResponse)
-        //{
-        //    using (var httpClient = new HttpClient())
-        //    {
-        //        httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {ApiKey}");
+        #endregion
 
-        //        var payload = JsonConvert.SerializeObject(new
-        //        {
-        //            model = "gpt-3.5-turbo",
-        //            messages = new[]
-        //            {
-        //                new { role = "system", content = $"{_config.AIPromptParameters.SystemRole}" },
-        //                new { role = "user", content = "Tell me about this server." },
-        //                new { role = "assistant", content = $"{_config.AIPromptParameters.UserServerDetails}" },
-        //                new { role = "user", content = $"{question}" },
-        //            },
-        //            temperature = _config.AIResponseParameters.Temperature,
-        //            max_tokens = _config.AIResponseParameters.MaxTokens,
-        //        });
+        #region Hook
 
-        //        try
-        //        {
-        //            var response = httpClient.PostAsync(ApiUrl, new StringContent(payload, Encoding.UTF8, "application/json")).Result;
-        //            response.EnsureSuccessStatusCode();
-        //            var responseContent = response.Content.ReadAsStringAsync().Result;
-        //            var rustGPTResponse = JsonConvert.DeserializeObject<RustGPTResponse>(responseContent);
-        //            var answer = rustGPTResponse.choices[0].message.content.Trim();
-        //            callback(answer);
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            PrintError(ex.Message);
-        //        }
-        //    }
-        //}
+        [HookMethod]
+        public void RustGPTHook(BasePlayer player, string question, string apiKey, float temperatureAI, int maxTokens, string systemRole, string userServerDetails, Action<string> callback)
+        {
+            var webClient = new WebClient();
+            webClient.Headers.Add("Content-Type", "application/json");
+            webClient.Headers.Add("Authorization", $"Bearer {apiKey}");
+
+            var payload = JsonConvert.SerializeObject(new
+            {
+                model = "gpt-3.5-turbo",
+                messages = new[]
+                {
+                    new { role = "system", content = $"{systemRole}" },
+                    new { role = "user", content = $"My name is {player.displayName} Tell me about this server." },
+                    new { role = "assistant", content = $"{userServerDetails}" },
+                    new { role = "user", content = $"{question}" },
+                },
+                temperature = temperatureAI,
+                max_tokens = maxTokens,
+            });
+
+            webClient.UploadStringCompleted += (sender, e) =>
+            {
+                if (e.Error != null)
+                {
+                    PrintError(e.Error.Message);
+                    player.ChatMessage($"{e.Error.Message} - There was an issue with the API request. Check your API key and API Url. If problem persists, check your usage at OpenAI.");
+                    return;
+                }
+
+                JObject jsonResponse = JObject.Parse(e.Result);
+                string answer = jsonResponse["choices"][0]["message"]["content"].ToString().Trim();
+                callback(answer);
+            };
+
+            webClient.UploadStringAsync(new Uri("https://api.openai.com/v1/chat/completions"), "POST", payload);
+        }
 
         #endregion
 
@@ -302,12 +260,6 @@ namespace Oxide.Plugins
                 }
             }
         }
-
-        #endregion
-
-        #region Definitions
-
-
 
         #endregion
 
@@ -418,7 +370,6 @@ namespace Oxide.Plugins
         {
             Puts($"Updating configuration file to version {PluginVersion}");
 
-            // Migrate settings from oldConfig to _config here.
             _config.OpenAI_Api_Key = oldConfig.OpenAI_Api_Key;
             _config.OutboundAPIUrl = oldConfig.OutboundAPIUrl;
             _config.ResponsePrefix = oldConfig.ResponsePrefix;
@@ -442,10 +393,7 @@ namespace Oxide.Plugins
                 UserServerDetails = oldConfig.AIPromptParameters.UserServerDetails
             };
 
-            // Set the new version
             _config.PluginVersion = PluginVersion;
-
-            // Save the updated configuration
             Config.WriteObject(_config, true);
         }
 

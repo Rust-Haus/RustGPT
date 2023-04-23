@@ -12,10 +12,10 @@
 # Features 🔥
 
 - Ask GPT questions directly from the game chat
-
 - Get text-based answers from GPT
-<!-- - Customizable cool down time -->
+- Customizable cool down time
 - Participate in the inevitable AI overlord takeover!
+- Hooks for use in other plugins
 
 # Contributing
 
@@ -173,51 +173,64 @@ The main goal of this plugin is to eventually use it as a container for core AI 
 
 
 
-# AskRustGPT Hook
+## RustGPTHook
 
-This method sends a question to the OpenAI GPT-3.5 Turbo API and processes the response.
+The `RustGPTHook` method is a hook for the RustGPT plugin that allows other plugins to make use of the GPT-3.5-turbo AI model from OpenAI.
 
-#### Parameters
+### Usage
 
-- `BasePlayer player`: The player who asks the question.
-- `string question`: The question to ask the AI.
-- `Action<string> callback`: A callback function that will be called with the AI's response as a parameter.
-- `bool broadcastResponse`: A boolean flag indicating whether the AI response should be broadcasted to all players or sent privately to the asking player.
+To use this hook, you need to pass the following parameters:
 
-#### Usage
-
-To use this method in another plugin, you can call it like this:
-
-```csharp
-yourPluginInstance.AskRustGPT(player, question, (response) => {
-    // Do something with the response, e.g., display it in the chat
-}, broadcastResponse); 
-```
-Make sure to replace yourPluginInstance with the actual instance of the RustGPT plugin. You can obtain the instance by subscribing to the plugin's hook, OnRustGPTLoaded.
+Parameters
+- player: The BasePlayer object representing the player making the request.
+- question: A string containing the question you want to ask the AI.
+- apiKey: Your OpenAI API key.
+- temperatureAI: A float value representing the AI's response randomness (between 0 and 1).
+- maxTokens: An integer value representing the maximum number of tokens in the AI's response.
+- systemRole: A string describing the role of the AI within the system.
+- userServerDetails: A string containing information about the server.
+- callback: An Action<string> delegate to handle the AI-generated response.
 
 ### Example
 
-Here's an example of how to use the AskRustGPT method in another plugin:
+Here's an example of how to call the `RustGPTHook` method from another plugin:
+
 ```csharp
-[PluginReference]
-Plugin RustGPT;
+using Oxide.Core.Plugins;
+using System;
 
-void OnRustGPTLoaded()
+namespace Oxide.Plugins
 {
-    Puts("RustGPT plugin loaded.");
-}
-
-void OnPlayerChat(BasePlayer player, string chatQuestion)
-{
-    if (chatQuestion.StartsWith("/askai "))
+    [Info("TestHook", "GooGurt", "0.0.1")]
+    [Description("Players can use OpenAI's ChatGPT from the game chat")]
+    class TestHook : RustPlugin
     {
-        string question = chatQuestion.Substring(7);
+        [PluginReference]
+        public Plugin RustGPT;
 
-        RustGPT?.Call("AskRustGPT", player, question, (Action<string>)(response => {
-            player.ChatMessage($"<color=green>AI:</color> {response}");
-        }), false);
+        [ChatCommand("testhook")]
+        private void MyCommand(BasePlayer player, string command, string[] args)
+        {
+            string question = "Send me an ASCII art.";
+            string apiKey = "your_api_key";
+            float temperatureAI = 0.8f;
+            int maxTokens = 50;
+            string systemRole = "You are an AI that provides helpful information to the players.";
+            string userServerDetails = "This server has a 5x gather rate and wipes every Thursday.";
+
+            RustGPT.Call("RustGPTHook", player, question, apiKey, temperatureAI, maxTokens, systemRole, userServerDetails, new Action<string>((response) =>
+            {
+                player.ChatMessage(response);
+            }),
+            new Action<string>((error) =>
+            {
+                Puts(error);
+                player.ChatMessage($"Error: {error} - There was an issue with the API request. Check your API key and API Url. If the problem persists, check your usage at OpenAI.");
+            }));
+        }
     }
 }
+
 ```
 
 # Author
