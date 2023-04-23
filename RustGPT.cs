@@ -1,32 +1,45 @@
 using Newtonsoft.Json;
-using Oxide.Core.Libraries.Covalence;
-using Oxide.Core.Plugins;
 using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Text.RegularExpressions;
+using Rust;
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("RustGPT", "GooGurt", "1.6.0")]
-    [Description("Ask questions to RustGPT from the game chat")]
-    class RustGPT : CovalencePlugin
+    [Info("RustGPT", "GooGurt", "1.6.1")]
+    [Description("Players can use OpenAI's ChatGPT from the game chat")]
+    class RustGPT : RustPlugin
     {
-        private string ApiKey => _config.OpenAI_Api_Key.ApiKey;
-        private string ApiUrl => _config.OutboundAPIUrl.ApiUrl; 
-        private Regex _questionRegex;
-        private PluginConfig _config;
+        #region Declarations
 
+        private string ApiKey => _config.OpenAI_Api_Key.ApiKey;
+        private string ApiUrl => _config.OutboundAPIUrl.ApiUrl;
+        private Regex _questionRegex { get; set; }
+        private PluginConfig _config { get; set; }
+        private const string PluginVersion = "1.6.1";
+        private readonly Version _version = new Version(PluginVersion);
+        private Dictionary<string, float> _lastUsageTime = new Dictionary<string, float>();
+
+
+        #endregion
+
+        #region Overrides
+
+        private void Init()
+        {
+            permission.RegisterPermission("RustGPT.use", this);
+            cmd.AddChatCommand("askgpt", this, "AskRustCommand");
+            Puts($"RustGPT {_version} initialized");
+        }
         protected override void LoadDefaultConfig()
         {
             Puts("Creating a new configuration file.");
-            _config = new PluginConfig();
+            _config = new PluginConfig { PluginVersion = PluginVersion };
             Config.WriteObject(_config, true);
-            _questionRegex = new Regex(_config.QuestionPattern, RegexOptions.IgnoreCase);
-
         }
-        
+
         protected override void LoadConfig()
         {
             base.LoadConfig();
@@ -50,105 +63,259 @@ namespace Oxide.Plugins
             {
                 Puts("Configuration file loaded.");
             }
-            
+
+            if (_config.PluginVersion != PluginVersion)
+            {
+                MigrateConfig(_config);
+            }
+
             _questionRegex = new Regex(_config.QuestionPattern, RegexOptions.IgnoreCase);
 
         }
 
-        private void Init()
-        {
-            permission.RegisterPermission("RustGPT.use", this);
-        }
+        #endregion
+
+        #region Commands
 
         [Command("askgpt")]
-        private void AskGPTCommand(IPlayer player, string command, string[] args)
+        private void AskRustCommand(BasePlayer player, string command, string[] args)
         {
-            if (!permission.UserHasPermission(player.Id, "RustGPT.use"))
+            if (!permission.UserHasPermission(player.UserIDString, "RustGPT.use"))
             {
-                player.Reply("You don't have permission to use this command.");
+                player.ChatMessage("You don't have permission to use this command.");
                 return;
             }
 
             if (args.Length == 0)
             {
-                player.Reply("Usage: /askgpt <your question>");
+                player.ChatMessage("Usage: /askgpt <your question>");
                 return;
             }
 
             string question = string.Join(" ", args);
+
             string coloredPrefix = $"<color={_config.ResponsePrefixColor}>{_config.ResponsePrefix}</color>";
-            AskRustGPT(question, response => player.Reply($"{coloredPrefix} {response}"));
+
+            AskRustGPT(player, question, response =>
+            {
+                string formattedResponse = $"{coloredPrefix} {response}";
+                Puts($"This is the response: {response}");
+                if (_config.BroadcastResponse)
+                {
+                    Server.Broadcast($"{player.displayName} asked: {question}");
+                    Server.Broadcast(formattedResponse);
+
+                }
+                else
+                {
+                    player.ChatMessage($"You asked: {question}");
+                    player.ChatMessage(formattedResponse);
+                }
+            }, _config.BroadcastResponse);
+
         }
 
-        private void AskRustGPT(string question, Action<string> callback)
+        #endregion
+
+        #region API Response Handling
+        public class Message
         {
-            WebClient webClient = new WebClient();
+            public string Role { get; set; }
+            public string Content { get; set; }
+
+            public Message(string role, string content)
+            {
+                Role = role;
+                Content = content;
+            }
+        }
+
+        public class RustGPTResponse
+        {
+            public string id { get; set; }
+            public string object_type { get; set; }
+            public int created { get; set; }
+            public List<RustGPTChoice> choices { get; set; }
+            public RustGPTUsage usage { get; set; }
+        }
+
+        public class RustGPTChoice
+        {
+            public int index { get; set; }
+            public RustGPTMessage message { get; set; }
+            public string finish_reason { get; set; }
+        }
+
+        public class RustGPTMessage
+        {
+            public string role { get; set; }
+            public string content { get; set; }
+        }
+
+        public class RustGPTUsage
+        {
+            public int prompt_tokens { get; set; }
+            public int completion_tokens { get; set; }
+            public int total_tokens { get; set; }
+        }
+
+        #endregion
+
+        #region API
+
+        private object OnPlayerChat(BasePlayer player, string chatQuestion)
+        {
+            if (permission.UserHasPermission(player.UserIDString, "RustGPT.use") &&
+                _questionRegex.IsMatch(chatQuestion) &&
+                HasCooldownElapsed(player))
+            {
+                string coloredPrefix = $"<color={_config.ResponsePrefixColor}>{_config.ResponsePrefix}</color>";
+                timer.Once(0.1f, () =>
+                {
+                    AskRustGPT(player, chatQuestion, response =>
+                    {
+                        string formattedResponse = $"{coloredPrefix} {response}";
+                        if (_config.BroadcastResponse)
+                        {
+                            Server.Broadcast($"{player.displayName} asked: {chatQuestion}");
+                            Server.Broadcast(formattedResponse);
+                        }
+                        else
+                        {
+                            player.ChatMessage(formattedResponse);
+                        }
+                    }, _config.BroadcastResponse);
+                });
+            }
+            return null;
+        }
+
+        private void AskRustGPT(BasePlayer player, string question, Action<string> callback, bool broadcastResponse)
+        {
+            var webClient = new WebClient();
             webClient.Headers.Add("Content-Type", "application/json");
             webClient.Headers.Add("Authorization", $"Bearer {ApiKey}");
 
-            string payload = JsonConvert.SerializeObject(new
+            var payload = JsonConvert.SerializeObject(new
             {
-                model = _config.AIResponseParameters.ChatModel,
-                prompt = $"Human: {question}\nAI:",
+                model = "gpt-3.5-turbo",
+                messages = new[]
+                {
+            new { role = "system", content = $"{_config.AIPromptParameters.SystemRole}" },
+            new { role = "user", content = $"My name is {player.displayName} Tell me about this server." },
+            new { role = "assistant", content = $"{_config.AIPromptParameters.UserServerDetails}" },
+            new { role = "user", content = $"{question}" },
+        },
                 temperature = _config.AIResponseParameters.Temperature,
                 max_tokens = _config.AIResponseParameters.MaxTokens,
-                top_p = 1,
-                frequency_penalty = _config.AIResponseParameters.FrequencyPenalty,
-                presence_penalty = _config.AIResponseParameters.PresencePenalty,
-                stop = new[] { " Human:", " AI:" }
             });
 
             webClient.UploadStringCompleted += (sender, e) =>
             {
                 if (e.Error != null)
                 {
-                    Puts($"Error: {e.Error.Message}");
+                    PrintError(e.Error.Message);
+                    player.ChatMessage($"{e.Error.Message} - There was an issue with the API request. Check your API key and API Url. If problem persists, check your usage at OpenAI.");
                     return;
                 }
 
-                RustGPTResponse response = JsonConvert.DeserializeObject<RustGPTResponse>(e.Result);
-                string answer = response.choices[0].text.Trim();
+                var rustGPTResponse = JsonConvert.DeserializeObject<RustGPTResponse>(e.Result);
+                var answer = rustGPTResponse.choices[0].message.content.Trim();
                 callback(answer);
             };
 
             webClient.UploadStringAsync(new Uri(ApiUrl), "POST", payload);
         }
 
-        private class RustGPTResponse
-        {
-            public List<Choice> choices { get; set; }
-        }
+        // ---------------------------------------------------------------------------------------------------------
+        //
+        //                  This will be used when oxide upgrades to C# 4.5 or higher
+        //
+        // ---------------------------------------------------------------------------------------------------------
+        //private void AskRustGPT(BasePlayer player, string question, Action<string> callback, bool broadcastResponse)
+        //{
+        //    using (var httpClient = new HttpClient())
+        //    {
+        //        httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {ApiKey}");
 
-        private class Choice
-        {
-            public string text { get; set; }
-        }
+        //        var payload = JsonConvert.SerializeObject(new
+        //        {
+        //            model = "gpt-3.5-turbo",
+        //            messages = new[]
+        //            {
+        //                new { role = "system", content = $"{_config.AIPromptParameters.SystemRole}" },
+        //                new { role = "user", content = "Tell me about this server." },
+        //                new { role = "assistant", content = $"{_config.AIPromptParameters.UserServerDetails}" },
+        //                new { role = "user", content = $"{question}" },
+        //            },
+        //            temperature = _config.AIResponseParameters.Temperature,
+        //            max_tokens = _config.AIResponseParameters.MaxTokens,
+        //        });
 
-        private object OnUserChat(IPlayer player, string message)
+        //        try
+        //        {
+        //            var response = httpClient.PostAsync(ApiUrl, new StringContent(payload, Encoding.UTF8, "application/json")).Result;
+        //            response.EnsureSuccessStatusCode();
+        //            var responseContent = response.Content.ReadAsStringAsync().Result;
+        //            var rustGPTResponse = JsonConvert.DeserializeObject<RustGPTResponse>(responseContent);
+        //            var answer = rustGPTResponse.choices[0].message.content.Trim();
+        //            callback(answer);
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //            PrintError(ex.Message);
+        //        }
+        //    }
+        //}
+
+        #endregion
+
+        #region Helpers
+
+        private bool HasCooldownElapsed(BasePlayer player)
         {
-            if (permission.UserHasPermission(player.Id, "RustGPT.use") && _questionRegex.IsMatch(message))
+            float lastUsageTime;
+
+            if (_lastUsageTime.TryGetValue(player.UserIDString, out lastUsageTime))
             {
-                string coloredPrefix = $"<color={_config.ResponsePrefixColor}>{_config.ResponsePrefix}</color>";
-                AskRustGPT(message, response => player.Reply($"{coloredPrefix} {response}"));
+                float elapsedTime = Time.realtimeSinceStartup - lastUsageTime;
+
+                if (elapsedTime < _config.CooldownInSeconds)
+                {
+                    float timeLeft = _config.CooldownInSeconds - elapsedTime;
+                    player.ChatMessage($"<color=green>You must wait <color=orange>{timeLeft:F0}</color> seconds before asking another question.</color>");
+                    return false;
+                }
             }
 
-            return null;
+            _lastUsageTime[player.UserIDString] = Time.realtimeSinceStartup;
+            return true;
         }
 
         private void NotifyAdminsOfApiKeyRequirement()
         {
-            foreach (IPlayer player in players.Connected) 
+            foreach (var player in BasePlayer.activePlayerList)
             {
-                if (permission.UserHasPermission(player.Id, "RustGPT.use"))
+                if (permission.UserHasPermission(player.UserIDString, "RustGPT.use"))
                 {
-                    player.Message("The RustGPT API key is not set in the configuration file. Please update the 'your-api-key-here' value with a valid API key to use the RustGPT plugin.");
+                    player.ChatMessage("The RustGPT API key is not set in the configuration file. Please update the 'your-api-key-here' value with a valid API key to use the RustGPT plugin.");
                 }
             }
         }
 
+        #endregion
+
+        #region Definitions
+
+
+
+        #endregion
+
+        #region Config
+
         private class OpenAI_Api_KeyConfig
         {
-            [JsonProperty("API Key")]
+            [JsonProperty("OpenAI API Key")]
             public string ApiKey { get; set; }
 
             public OpenAI_Api_KeyConfig()
@@ -164,15 +331,27 @@ namespace Oxide.Plugins
 
             public OutboundAPIUrlConfig()
             {
-                ApiUrl = "https://api.openai.com/v1/completions";
+                ApiUrl = "https://api.openai.com/v1/chat/completions";
+            }
+        }
+
+        private class AIPromptParametersConfig
+        {
+            [JsonProperty("System role")]
+            public string SystemRole { get; set; }
+
+            [JsonProperty("User Server Details")]
+            public string UserServerDetails { get; set; }
+
+            public AIPromptParametersConfig()
+            {
+                SystemRole = "You are a helpful assistant on Rust game server called Rust.Haus Testing Server.";
+                UserServerDetails = "Server wipes Thursdays at 2pm CST. Blueprints are wiped on forced wipes only. Gather rate is 5X. Available commands available by using /info. Server admin is Goo. The discord link is https://discord.gg/EQNPBxdjRu";
             }
         }
 
         private class AIResponseParametersConfig
         {
-            [JsonProperty("Model")]
-            public string ChatModel { get; set; }
-
             [JsonProperty("Temperature")]
             public double Temperature { get; set; }
 
@@ -187,7 +366,6 @@ namespace Oxide.Plugins
 
             public AIResponseParametersConfig()
             {
-                ChatModel = "text-davinci-003";
                 Temperature = 0.9;
                 MaxTokens = 150;
                 PresencePenalty = 0.6;
@@ -200,7 +378,9 @@ namespace Oxide.Plugins
             public OpenAI_Api_KeyConfig OpenAI_Api_Key { get; set; }
             public OutboundAPIUrlConfig OutboundAPIUrl { get; set; }
             public AIResponseParametersConfig AIResponseParameters { get; set; }
-            
+            public AIPromptParametersConfig AIPromptParameters { get; set; }
+
+
             [JsonProperty("Response Prefix")]
             public string ResponsePrefix { get; set; }
 
@@ -210,16 +390,65 @@ namespace Oxide.Plugins
             [JsonProperty("Response Prefix Color")]
             public string ResponsePrefixColor { get; set; }
 
+            [JsonProperty("Broadcast Response to the server")]
+            public bool BroadcastResponse { get; set; }
+
+            [JsonProperty("Plugin Version")]
+            public string PluginVersion { get; set; }
+
+            [JsonProperty("Chat cool down in seconds")]
+            public int CooldownInSeconds { get; set; }
+
+
             public PluginConfig()
             {
                 OpenAI_Api_Key = new OpenAI_Api_KeyConfig();
                 AIResponseParameters = new AIResponseParametersConfig();
+                AIPromptParameters = new AIPromptParametersConfig();
                 OutboundAPIUrl = new OutboundAPIUrlConfig();
                 ResponsePrefix = "[RustGPT]";
                 QuestionPattern = @"!gpt";
                 ResponsePrefixColor = "#55AAFF";
-
+                BroadcastResponse = false;
+                CooldownInSeconds = 10;
             }
         }
+
+        private void MigrateConfig(PluginConfig oldConfig)
+        {
+            Puts($"Updating configuration file to version {PluginVersion}");
+
+            // Migrate settings from oldConfig to _config here.
+            _config.OpenAI_Api_Key = oldConfig.OpenAI_Api_Key;
+            _config.OutboundAPIUrl = oldConfig.OutboundAPIUrl;
+            _config.ResponsePrefix = oldConfig.ResponsePrefix;
+            _config.ResponsePrefixColor = oldConfig.ResponsePrefixColor;
+            _config.BroadcastResponse = oldConfig.BroadcastResponse;
+            _config.QuestionPattern = oldConfig.QuestionPattern;
+            _config.BroadcastResponse = oldConfig.BroadcastResponse;
+            _config.CooldownInSeconds = oldConfig.CooldownInSeconds;
+
+            _config.AIResponseParameters = new AIResponseParametersConfig
+            {
+                Temperature = oldConfig.AIResponseParameters.Temperature,
+                MaxTokens = oldConfig.AIResponseParameters.MaxTokens,
+                PresencePenalty = oldConfig.AIResponseParameters.PresencePenalty,
+                FrequencyPenalty = oldConfig.AIResponseParameters.FrequencyPenalty
+            };
+
+            _config.AIPromptParameters = new AIPromptParametersConfig
+            {
+                SystemRole = oldConfig.AIPromptParameters.SystemRole,
+                UserServerDetails = oldConfig.AIPromptParameters.UserServerDetails
+            };
+
+            // Set the new version
+            _config.PluginVersion = PluginVersion;
+
+            // Save the updated configuration
+            Config.WriteObject(_config, true);
+        }
+
+        #endregion
     }
 }
