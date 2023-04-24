@@ -6,7 +6,7 @@ Are you sick of playing Rust like a normal person? Yeah, us too. That's why we c
 ![Logo](https://i.imgur.com/KttasYy.png)
 
 
-# Version 1.6.1
+# Version 1.6.3
 
 # Features 🔥
 
