@@ -10,7 +10,7 @@ using Oxide.Core.Plugins;
 
 namespace Oxide.Plugins
 {
-    [Info("RustGPT", "GooGurt", "1.6.3")]
+    [Info("RustGPT", "GooGurt", "1.6.4")]
     [Description("Players can use OpenAI's ChatGPT from the game chat")]
     class RustGPT : RustPlugin
     {
@@ -20,7 +20,7 @@ namespace Oxide.Plugins
         private string ApiUrl => _config.OutboundAPIUrl.ApiUrl;
         private Regex _questionRegex { get; set; }
         private PluginConfig _config { get; set; }
-        private const string PluginVersion = "1.6.3";
+        private const string PluginVersion = "1.6.4";
         private readonly Version _version = new Version(PluginVersion);
         private Dictionary<string, float> _lastUsageTime = new Dictionary<string, float>();
 
