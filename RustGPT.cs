@@ -223,7 +223,7 @@ namespace Oxide.Plugins
                 callback(answer);
             };
 
-            webClient.UploadStringAsync(new Uri("https://api.openai.com/v1/chat/completions"), "POST", payload);
+            webClient.UploadStringAsync(new Uri(_config.OutboundAPIUrl.ApiUrl), "POST", payload);
         }
 
         #endregion
