@@ -7,6 +7,9 @@ using Rust;
 using UnityEngine;
 using Newtonsoft.Json.Linq;
 using Oxide.Core.Plugins;
+using System.ComponentModel;
+
+#pragma warning disable SYSLIB0014
 
 #pragma warning disable SYSLIB0014
 
@@ -294,7 +297,6 @@ namespace Oxide.Plugins
 
         private void SendDiscordMessage(string message)
         {
-            //if (_config.OptionalPlugins.UseDiscordWebhookChat) return;
             string Message = $"{_config.ResponsePrefix} {message}";
             DiscordMessages?.Call("API_SendTextMessage", _config.OptionalPlugins.DiscordWebhookChatUrl, string.Format(Message));
         }
