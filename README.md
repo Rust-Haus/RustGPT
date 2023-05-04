@@ -71,11 +71,11 @@ Then assign permission to yourself or a group. This is how to grant permission t
 
 In console for oxide:
 
-` o.grant user <player_name_or_steam_id> RustGPT.use `
+` o.grant user <player_name_or_steam_id> RustGPT.chat `
 
 In console for Carbon:
 
-` c.grant user <player_name_or_steam_id> RustGPT.use `
+` c.grant user <player_name_or_steam_id> RustGPT.chat `
 
 Restart the plugin.
 
