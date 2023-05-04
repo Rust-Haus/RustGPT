@@ -12,7 +12,7 @@ using Oxide.Core.Plugins;
 
 namespace Oxide.Plugins
 {
-    [Info("RustGPT", "GooGurt", "1.6.5")]
+    [Info("RustGPT", "GooGurt", "1.6.51")]
     [Description("Players can use OpenAI's ChatGPT from the game chat")]
     public class RustGPT : RustPlugin
     {
@@ -21,7 +21,7 @@ namespace Oxide.Plugins
         private string ApiUrl => _config.OutboundAPIUrl.ApiUrl;
         private Regex _questionRegex { get; set; }
         private PluginConfig _config { get; set; }
-        private const string PluginVersion = "1.6.5";
+        private const string PluginVersion = "1.6.51";
         private readonly Version _version = new Version(PluginVersion);
         private Dictionary<string, float> _lastUsageTime = new Dictionary<string, float>();
         private Dictionary<string, Uri> _uriCache = new Dictionary<string, Uri>();
@@ -285,7 +285,7 @@ namespace Oxide.Plugins
         {
             foreach (var player in BasePlayer.activePlayerList)
             {
-                if (permission.UserHasPermission(player.UserIDString, "RustGPT.use"))
+                if (permission.UserHasPermission(player.UserIDString, "RustGPT.chat"))
                 {
                     player.ChatMessage("The RustGPT API key is not set in the configuration file.");
                 }
