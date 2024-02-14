@@ -9,13 +9,15 @@ using Newtonsoft.Json.Linq;
 using Oxide.Core.Plugins;
 using System.ComponentModel;
 using System.Runtime.Remoting.Channels;
+using System.Linq;
+using System.Security.Policy;
 
 #pragma warning disable SYSLIB0014
 
 namespace Oxide.Plugins
 {
-    [Info("RustGPT", "GooGurt", "1.7.1")]
-    [Description("Players can use OpenAI's ChatGPT from the game chat")]
+    [Info("RustGPT", "GooGurt", "1.7.6")]
+    [Description("Players can use OpenAI's ChatGPT from the game chat, incudes ChatGPT color commentary for deaths.")]
     public class RustGPT : RustPlugin
     {
         #region Declarations
@@ -23,18 +25,17 @@ namespace Oxide.Plugins
         private string ApiUrl => _config.OutboundAPIUrl.ApiUrl;
         private Regex _questionRegex { get; set; }
         private PluginConfig _config { get; set; }
-        private const string PluginVersion = "1.7.1";
+        private const string PluginVersion = "1.7.6";
         private readonly Version _version = new Version(PluginVersion);
         private Dictionary<string, float> _lastUsageTime = new Dictionary<string, float>();
         private Dictionary<string, Uri> _uriCache = new Dictionary<string, Uri>();
 
-        [PluginReference]
-        private Plugin DeathNotes;
         #endregion
 
         #region Overrides
         private void Init()
         {
+
             permission.RegisterPermission("RustGPT.chat", this);
 
             if (string.IsNullOrEmpty(ApiKey) || ApiKey == "your-api-key-here")
@@ -55,6 +56,10 @@ namespace Oxide.Plugins
             }
 
             ShowPluginStatusToAdmins();
+
+            cmd.AddChatCommand("models", this, nameof(ModelsCommand));
+
+
         }
 
         protected override void LoadDefaultConfig()
@@ -132,18 +137,17 @@ namespace Oxide.Plugins
 
                         if (_config.OptionalPlugins.UseDiscordWebhookChat)
                         {
-
                             var discordPayload = $"**{player}** \n> {cleaned_chat_question}.\n**{_config.ResponsePrefix}** \n> {GPT_Chat_Reply}";
                             SendDiscordMessage(discordPayload);
                         }
 
                         if (_config.BroadcastResponse)
                         {
-                            Server.Broadcast($" Responding to {player.displayName}:\n {toChat}");
+                            Server.Broadcast(toChat);
                         }
                         else
                         {
-                            player.ChatMessage(toChat);
+                            SendChatMessageInChunks(player, toChat, 250);
                         }
                     });
             }
@@ -152,6 +156,204 @@ namespace Oxide.Plugins
                 PrintError($"{player.displayName} does not have permission to use RustGPT.");
             }
         }
+
+        private void SendChatMessageInChunks(BasePlayer player, string message, int chunkSize)
+        {
+            for (int i = 0; i < message.Length; i += chunkSize)
+            {
+                string chunk = message.Substring(i, Math.Min(chunkSize, message.Length - i));
+                player.ChatMessage(chunk);
+            }
+        }
+        #endregion
+
+        #region Death_Commentary
+
+        private void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
+        {
+            if (!_config.OptionalPlugins.UseDeathComment || entity == null || info == null) return;
+
+            BasePlayer victim = entity.ToPlayer();
+            BasePlayer attacker = info.InitiatorPlayer;
+
+            if (victim != null && !(victim is NPCPlayer) && attacker != null && !(attacker is NPCPlayer))
+            {
+                string attackerName = StripRichText(attacker.displayName);
+                string victimName = StripRichText(victim.displayName);
+
+                string weaponName = GetWeaponDisplayName(attacker);
+                string hitBone = GetHitBone(info);
+
+                string deathMessage = $"{attackerName} killed {victimName} with a {weaponName} in the {hitBone}";
+
+                if (_config.DeathNoteSettings.ShowSimpleKillFeed)
+                {
+                    string killMessageColor = _config.DeathNoteSettings.KillMessageColor;
+                    int killMessageFontSize = _config.DeathNoteSettings.KillMessageFontSize;
+
+                    string formattedMessagePart = $"<color={killMessageColor}><size={killMessageFontSize}>{deathMessage}</size></color>";
+
+
+                    Server.Broadcast(formattedMessagePart);
+                }
+                if (_config.OptionalPlugins.UseDiscordWebhookChat)
+                {
+
+                    SendDiscordMessage(deathMessage);
+                }
+
+                SendDeathMessageToOpenAI(deathMessage);
+
+            }
+        }
+
+        private string GetEntityName(BaseCombatEntity entity)
+        {
+
+            if (entity is BasePlayer player)
+            {
+                return StripRichText(player.displayName);
+            }
+            else if (entity is NPCPlayer)
+            {
+                if (entity.ShortPrefabName.Contains("scientist"))
+                {
+                    return "Scientist";
+                }
+            }
+            else if (entity is BaseAnimalNPC)
+            {
+                return entity.ShortPrefabName;
+            }
+            else if (entity is BaseHelicopter)
+            {
+                return "Helicopter";
+            }
+
+            return "an unknown entity";
+        }
+
+        private string StripRichText(string text)
+        {
+            return Regex.Replace(text, "<.*?>", String.Empty);
+        }
+
+        private string GetHitBone(HitInfo info)
+        {
+            if (info.HitEntity == null || info.HitEntity.ToPlayer() == null) return "";
+
+            string hitBone;
+
+            BaseCombatEntity hitEntity = info.HitEntity as BaseCombatEntity;
+
+            SkeletonProperties.BoneProperty boneProperty = hitEntity.skeletonProperties?.FindBone(info.HitBone);
+
+            string bone = boneProperty?.name?.english ?? "";
+
+            return bone;
+        }
+
+        private string CreateDeathMessage(BasePlayer victim, BasePlayer attacker, HitInfo info)
+        {
+            string weaponDisplayName = GetWeaponDisplayName(attacker);
+            string bodyPart = GetHitBone(info);
+            bool isHeadshot = info.isHeadshot;
+
+            string deathMessage = $"{attacker.displayName} killed {victim.displayName} with a {weaponDisplayName}";
+
+            if (!string.IsNullOrEmpty(bodyPart))
+            {
+                deathMessage += $" by hitting their {bodyPart}";
+            }
+
+            if (isHeadshot)
+            {
+                deathMessage += " (headshot)";
+            }
+
+            return deathMessage;
+        }
+
+        private string GetWeaponDisplayName(BasePlayer attacker)
+        {
+            if (attacker != null && attacker.GetActiveItem() != null)
+            {
+                Item activeItem = attacker.GetActiveItem();
+                return activeItem.info.displayName.translated;
+            }
+
+            return "unknown";
+        }
+
+        private ItemDefinition GetItemDefinitionFromEntity(BaseEntity entity)
+        {
+            if (entity != null)
+            {
+                Item item = entity.GetComponent<Item>();
+
+                if (item != null)
+                {
+                    return item.info;
+                }
+            }
+
+            return null;
+        }
+
+        private void SendDeathMessageToOpenAI(string deathMessage)
+        {
+            RustGPTHook(ApiKey,
+                new
+                {
+                    model = _config.AIResponseParameters.Model,
+                    messages = new[]
+                    {
+                        new { role = "system", content = _config.OptionalPlugins.DeathCommentaryPrompt },
+                        new { role = "user", content = deathMessage }
+                    },
+                    temperature = _config.AIResponseParameters.Temperature,
+                    max_tokens = _config.AIResponseParameters.MaxTokens,
+                    presence_penalty = _config.AIResponseParameters.PresencePenalty,
+                    frequency_penalty = _config.AIResponseParameters.FrequencyPenalty
+                },
+                ApiUrl,
+                response =>
+                {
+                    string GPT_Chat_Reply = response["choices"][0]["message"]["content"].ToString().Trim();
+
+                    BroadcastDeathNote(GPT_Chat_Reply);
+                });
+        }
+
+        private void BroadcastDeathNote(string message)
+        {
+            const int MaxMessageLength = 500; // I left this out of the config since this is more of a steam thing more than a rust thing. I doubt steam will change their message sizes in the near future. 
+            string killMessageColor = _config.DeathNoteSettings.KillMessageColor;
+            int killMessageFontSize = _config.DeathNoteSettings.KillMessageFontSize;
+
+            var messageParts = SplitMessageIntoChunks(message, MaxMessageLength).ToList();
+
+            if (!messageParts.Any())
+            {
+                return;
+            }
+
+            foreach (var messagePart in messageParts)
+            {
+
+                string formattedMessagePart = $"<color={killMessageColor}><size={killMessageFontSize}>{messagePart}</size></color>";
+                Server.Broadcast(formattedMessagePart);
+            }
+        }
+
+        private IEnumerable<string> SplitMessageIntoChunks(string message, int chunkSize)
+        {
+            for (int i = 0; i < message.Length; i += chunkSize)
+            {
+                yield return message.Substring(i, Math.Min(chunkSize, message.Length - i));
+            }
+        }
+
         #endregion
 
         #region Hook
@@ -202,33 +404,68 @@ namespace Oxide.Plugins
                 try
                 {
                     string response = webClient.DownloadString(url);
+
+                    if (response == null)
+                    {
+                        Puts("Something went wrong retrieving the model list.");
+                        return;
+                    }
                     JObject jsonResponse = JObject.Parse(response);
                     JToken models;
-                    if (jsonResponse.TryGetValue("data", out models))
+                    if (jsonResponse.TryGetValue("data", out models) && models is JArray modelsArray)
                     {
                         List<string> modelIds = new List<string>();
-                        foreach (JObject model in models)
+                        foreach (JObject model in modelsArray)
                         {
-                            modelIds.Add(model["id"].ToString());
+                            string modelId = model["id"].ToString();
+                            if (modelId.StartsWith("gpt", StringComparison.OrdinalIgnoreCase))
+                            {
+                                modelIds.Add(modelId);
+                            }
                         }
+
                         callback(modelIds);
                     }
                     else
                     {
-
                         PrintError($"Failed to fetch the list of available models.");
                     }
                 }
                 catch (WebException ex)
                 {
                     PrintError($"Error: {ex.Status} - {ex.Message}\n" +
-                        $"[OpenAI-RustGPT] If your API key is correctly entered in your configuration file you may have an invalid API key\n" +
-                        $"[OpenAI-RustGPT] Make sure your API key is valid: https://platform.openai.com/account/api-keys \n" +
-                        $"[OpenAI-RustGPT] config/RustGPT.json - OpenAI API Key: {ApiKey}\n");
+                        $"[RustGPT] If your API key is correctly entered in your configuration file you may have an invalid API key\n" +
+                        $"[RustGPT] Make sure your API key is valid: https://platform.openai.com/account/api-keys \n" +
+                        $"[RustGPT] config/RustGPT.json - OpenAI API Key: {apiKey}\n");
                 }
             }
         }
+        private void ModelsCommand(BasePlayer player, string command, string[] args)
+        {
+            if (player.net.connection.authLevel < 2)
+            {
+                player.ChatMessage("You must have auth level 2 to use this command.");
+                return;
+            }
 
+            ListAvailableModels(ApiKey, (modelList) =>
+            {
+                if (modelList == null || modelList.Count == 0)
+                {
+                    player.ChatMessage("No models available or failed to retrieve models.");
+                    return;
+                }
+
+                string models = string.Join("\n ", modelList.ToArray());
+                player.ChatMessage($"Available Models:\n {models}");
+
+                if (_config.OptionalPlugins.UseDiscordWebhookChat)
+                {
+                    SendDiscordMessage(models);
+                }
+
+            });
+        }
 
         [HookMethod("CheckOpenAIModel")]
         public void CheckOpenAIModel(string apiKey, string model, Func<bool, bool> callback)
@@ -240,7 +477,6 @@ namespace Oxide.Plugins
             });
         }
 
-
         #endregion
 
         #region Helpers
@@ -251,7 +487,9 @@ namespace Oxide.Plugins
             {
                 if (permission.UserHasPermission(player.UserIDString, "RustGPT.chat") && player.net.connection.authLevel >= 2)
                 {
-                    string statusMessage = "RustGPT Plugin is active.\n";
+                    string statusMessage = "RustGPT Plugin is active. Use /rustgptfeedback for suggestions and/or problems.\n";
+
+                    statusMessage += "Using model: " + _config.AIResponseParameters.Model + "\n";
 
                     if (_config.OptionalPlugins.UseDiscordWebhookChat)
                     {
@@ -262,7 +500,7 @@ namespace Oxide.Plugins
                         statusMessage += "Discord Messages: Disabled\n";
                     }
 
-                    if (_config.OptionalPlugins.UseDeathNotes)
+                    if (_config.OptionalPlugins.UseDeathComment)
                     {
                         statusMessage += "Death Notes: Enabled\n";
                     }
@@ -321,99 +559,6 @@ namespace Oxide.Plugins
                 var response = webClient.UploadString(_config.OptionalPlugins.DiscordWebhookChatUrl, "POST", serializedPayload);
 
             }
-        }
-
-        private object OnDeathNotice(Dictionary<string, object> data, string message)
-        {
-
-            string victimEntityType = data["VictimEntityType"]?.ToString();
-            string killerEntityType = data["KillerEntityType"]?.ToString();
-            string someoneDead = data["VictimEntity"]?.ToString();
-            string someMurderer = data["KillerEntity"]?.ToString();
-            string murderWeapon = data["DamageType"]?.ToString();
-            string boneArea = "";
-            string headshotKill = "false";
-            string deathToGpt = "";
-
-
-            bool IsNumeric(string value)
-            {
-                return int.TryParse(value, out _);
-            }
-
-            int dead = someoneDead.IndexOf('[');
-            if (dead != -1)
-            {
-                someoneDead = someoneDead.Substring(0, dead);
-            }
-
-            if (victimEntityType != "Player" && IsNumeric(someoneDead))
-            {
-                someoneDead = victimEntityType;
-            }
-
-            int murderer = someMurderer.IndexOf('[');
-            if (murderer != -1)
-            {
-                someMurderer = someMurderer.Substring(0, murderer);
-            }
-
-            if (data.ContainsKey("HitInfo"))
-            {
-                var hitInfo = data["HitInfo"];
-                foreach (var prop in hitInfo.GetType().GetProperties())
-                {
-                    if (prop.Name == "boneArea")
-                    {
-                        boneArea = prop.GetValue(hitInfo, null)?.ToString();
-                        break;
-                    }
-
-                    if (prop.Name == "isHeadshot")
-                    {
-                        headshotKill = prop.GetValue(hitInfo, null)?.ToString();
-                    }
-                }
-            }
-
-            if (headshotKill == "True")
-            {
-                deathToGpt = $"{someMurderer} killed {someoneDead} with a headshot!";
-
-            }
-            else
-            {
-                deathToGpt = $"{someMurderer} killed {someoneDead} with {murderWeapon} in the {boneArea}";
-            }
-
-
-            RustGPTHook(ApiKey, new
-            {
-                model = _config.AIResponseParameters.Model,
-                messages = new[]
-                        {
-                            new {role = "system", content= $"{_config.OptionalPlugins.DeathNotesPrompt}"},
-                            new {role = "user", content = deathToGpt}
-                        },
-                temperature = _config.AIResponseParameters.Temperature,
-                max_tokens = _config.AIResponseParameters.MaxTokens,
-                presence_penalty = _config.AIResponseParameters.PresencePenalty,
-                frequency_penalty = _config.AIResponseParameters.FrequencyPenalty
-            }, ApiUrl,
-                    response =>
-                    {
-                        string customPrefix = $"<color={_config.ResponsePrefixColor}>{_config.ResponsePrefix}</color>";
-                        string GPT_Chat_Reply = response["choices"][0]["message"]["content"].ToString().Trim();
-                        string toChat = $"{customPrefix} {GPT_Chat_Reply}";
-
-                        Server.Broadcast(toChat);
-
-                        if (!_config.OptionalPlugins.UseDiscordWebhookChat) return;
-                        string deathGPTpayload = $"\n{deathToGpt}\n{GPT_Chat_Reply}\n";
-                        SendDiscordMessage(deathGPTpayload);
-                    });
-
-            return null;
         }
 
         #endregion
@@ -486,10 +631,10 @@ namespace Oxide.Plugins
         private class OptionalPluginsConfig
         {
             [JsonProperty("Turn on GPT Powered Death Notes")]
-            public bool UseDeathNotes { get; set; }
+            public bool UseDeathComment { get; set; }
 
-            [JsonProperty("Death Notes GPT Prompt")]
-            public string DeathNotesPrompt { get; set; }
+            [JsonProperty("Kill GPT Prompt")]
+            public string DeathCommentaryPrompt { get; set; }
 
             [JsonProperty("DiscordMessages Webhook URL")]
             public string DiscordWebhookChatUrl { get; set; }
@@ -497,15 +642,33 @@ namespace Oxide.Plugins
             [JsonProperty("Broadcast RustGPT Messages to Discord?")]
             public bool UseDiscordWebhookChat { get; set; }
 
+            [JsonProperty("Steam API Key")]
+            public string SteamApiKey { get; set; }
+
             public OptionalPluginsConfig()
             {
                 UseDiscordWebhookChat = false;
                 DiscordWebhookChatUrl = "https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks";
-                UseDeathNotes = false;
-                DeathNotesPrompt = "You are a color commentator on the hottest new deathmatch show of the future. You can use Markdown in your responses.";
+                UseDeathComment = false;
+                DeathCommentaryPrompt = "You are an extremely rude color commentator on the hottest new deathmatch show of the future. You use profanity and make fun of the people involved.";
+                SteamApiKey = "get-your-steam-api-key-here(https://steamcommunity.com/dev/apikey)";
+
             }
 
         }
+
+        private class DeathNoteConfig
+        {
+            [JsonProperty("Kill Message Color")]
+            public string KillMessageColor { get; set; } = "#ADD8E6";
+
+            [JsonProperty("Kill Message Font Size")]
+            public int KillMessageFontSize { get; set; } = 12;
+
+            [JsonProperty("Show simple kill feed in chat")]
+            public bool ShowSimpleKillFeed { get; set; } = false;
+        }
+
 
         private class PluginConfig
         {
@@ -514,6 +677,7 @@ namespace Oxide.Plugins
             public AIResponseParametersConfig AIResponseParameters { get; set; }
             public AIPromptParametersConfig AIPromptParameters { get; set; }
             public OptionalPluginsConfig OptionalPlugins { get; set; }
+            public DeathNoteConfig DeathNoteSettings { get; set; }
 
 
             [JsonProperty("Response Prefix")]
@@ -534,6 +698,8 @@ namespace Oxide.Plugins
             [JsonProperty("Chat cool down in seconds")]
             public int CooldownInSeconds { get; set; }
 
+
+
             public PluginConfig()
             {
                 OpenAI_Api_Key = new OpenAI_Api_KeyConfig();
@@ -546,6 +712,8 @@ namespace Oxide.Plugins
                 ResponsePrefixColor = "#55AAFF";
                 BroadcastResponse = false;
                 CooldownInSeconds = 10;
+                DeathNoteSettings = new DeathNoteConfig();
+
             }
         }
 
@@ -581,8 +749,16 @@ namespace Oxide.Plugins
             {
                 DiscordWebhookChatUrl = oldConfig.OptionalPlugins.DiscordWebhookChatUrl,
                 UseDiscordWebhookChat = oldConfig.OptionalPlugins.UseDiscordWebhookChat,
-                UseDeathNotes = oldConfig.OptionalPlugins.UseDeathNotes,
-                DeathNotesPrompt = oldConfig.OptionalPlugins.DeathNotesPrompt,
+                UseDeathComment = oldConfig.OptionalPlugins.UseDeathComment,
+                DeathCommentaryPrompt = oldConfig.OptionalPlugins.DeathCommentaryPrompt,
+                SteamApiKey = oldConfig.OptionalPlugins.SteamApiKey,
+            };
+
+            _config.DeathNoteSettings = new DeathNoteConfig
+            {
+                KillMessageColor = oldConfig.DeathNoteSettings?.KillMessageColor ?? "#ADD8E6",
+                KillMessageFontSize = oldConfig.DeathNoteSettings?.KillMessageFontSize ?? 12,
+                ShowSimpleKillFeed = oldConfig.DeathNoteSettings?.ShowSimpleKillFeed ?? false,
             };
 
             _config.PluginVersion = PluginVersion;
