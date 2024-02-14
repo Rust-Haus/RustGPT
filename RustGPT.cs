@@ -16,7 +16,7 @@ using System.Security.Policy;
 
 namespace Oxide.Plugins
 {
-    [Info("RustGPT", "GooGurt", "1.7.6")]
+    [Info("RustGPT", "Goo_", "1.7.6")]
     [Description("Players can use OpenAI's ChatGPT from the game chat, incudes ChatGPT color commentary for deaths.")]
     public class RustGPT : RustPlugin
     {
