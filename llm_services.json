@@ -1,0 +1,81 @@
+{
+    "Services": [
+        {
+            "Id": 1,
+            "Name": "Groq",
+            "Model": "llama3-8b-8192",
+            "Url": "https://api.groq.com/openai/v1/chat/completions",
+            "Reference": "https://console.groq.com/docs/"
+        },
+        {
+            "Id": 2,
+            "Name": "Hugging Face GPT-2",
+            "Model": "gpt2",
+            "Url": "https://api-inference.huggingface.co/models/gpt2",
+            "Reference": "https://huggingface.co/docs/transformers/model_doc/gpt2"
+        },
+        {
+            "Id": 3,
+            "Name": "EleutherAI GPT-Neo",
+            "Model": "gpt-neo-2.7B",
+            "Url": "https://api-inference.huggingface.co/models/EleutherAI/gpt-neo-2.7B",
+            "Reference": "https://huggingface.co/EleutherAI/gpt-neo-2.7B"
+        },
+        {
+            "Id": 4,
+            "Name": "Cohere",
+            "Model": "large",
+            "Url": "https://api.cohere.ai/generate",
+            "Reference": "https://docs.cohere.com/docs/the-cohere-platform"
+        },
+        {
+            "Id": 5,
+            "Name": "Google T5",
+            "Model": "t5-small",
+            "Url": "https://api-inference.huggingface.co/models/t5-small",
+            "Reference": "https://huggingface.co/docs/transformers/model_doc/t5"
+        },
+        {
+            "Id": 6,
+            "Name": "BigScience BLOOM",
+            "Model": "bloom",
+            "Url": "https://api-inference.huggingface.co/models/bigscience/bloom",
+            "Reference": "https://huggingface.co/bigscience/bloom"
+        },
+        {
+            "Id": 7,
+            "Name": "Falcon 40B",
+            "Model": "falcon-40b",
+            "Url": "https://api-inference.huggingface.co/models/tiiuae/falcon-40b",
+            "Reference": "https://huggingface.co/tiiuae/falcon-40b"
+        },
+        {
+            "Id": 8,
+            "Name": "Gemma 7B",
+            "Model": "gemma-7b",
+            "Url": "https://api-inference.huggingface.co/models/google/gemma-7b",
+            "Reference": "https://huggingface.co/google/gemma-7b"
+        },
+        {
+            "Id": 9,
+            "Name": "StarCoder",
+            "Model": "starcoder",
+            "Url": "https://api-inference.huggingface.co/models/bigcode/starcoder",
+            "Reference": "https://huggingface.co/bigcode/starcoder"
+        },
+        {
+            "Id": 10,
+            "Name": "MPT-30B",
+            "Model": "mpt-30b",
+            "Url": "https://api-inference.huggingface.co/models/mosaicml/mpt-30b",
+            "Reference": "https://huggingface.co/mosaicml/mpt-30b"
+        },
+        {
+            "Id": 11,
+            "Name": "HuggingFaceH4 Zephyr-7B-Beta",
+            "Model": "zephyr-7b-beta",
+            "Url": "https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta",
+            "Reference": "https://huggingface.co/HuggingFaceH4/zephyr-7b-beta"
+        }
+    ]
+}

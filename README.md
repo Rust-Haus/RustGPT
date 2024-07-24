@@ -1,4 +1,4 @@
-# RustGPT Ver 1.6.5
+# RustGPT Ver 2
 
 Are you sick of playing Rust like a normal person? Yeah, us too. That's why we created the Rust GPT plugin, so you can chat with an AI while you wander aimlessly through the map, waiting to get shot out of nowhere. Who needs a game plan when you have an AI to talk to?
 
@@ -8,10 +8,8 @@ Are you sick of playing Rust like a normal person? Yeah, us too. That's why we c
 
 - Ask GPT questions directly from the game chat
 - Get text-based answers from GPT
-- Customizable cool down time
+- Customizable cooldown time
 - Participate in the inevitable AI overlord takeover!
-- Hooks for use in other plugins
-- Now supports [**Discord Messages**](https://umod.org/plugins/discord-messages) and [**Death Notes**](https://umod.org/plugins/death-notes)
 
 # Contributing
 
