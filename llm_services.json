@@ -11,12 +11,6 @@
             "Model": "llama3-8b-8192",
             "Url": "https://api.groq.com/openai/v1/chat/completions",
             "Reference": "https://console.groq.com/docs/"
-        },
-        "Anthropic": {
-            "Name": "Anthropic",
-            "Model":"claude-3-5-sonnet-20240620",
-            "Url": "https://api.anthropic.com/v1/complete",
-            "Reference": "https://docs.anthropic.com/en/docs/welcome"
         }
     }
 }
