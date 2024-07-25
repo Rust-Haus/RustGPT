@@ -1,70 +1,22 @@
 {
     "Services": {
+        "OpenAI": {
+            "Name": "OpenAI",
+            "Model": "",
+            "Url": "",
+            "Reference": ""
+        },
         "Groq": {
             "Name": "Groq",
             "Model": "llama3-8b-8192",
             "Url": "https://api.groq.com/openai/v1/chat/completions",
             "Reference": "https://console.groq.com/docs/"
         },
-        "Hugging Face GPT-2": {
-            "Name": "Hugging Face GPT-2",
-            "Model": "gpt2",
-            "Url": "https://api-inference.huggingface.co/models/gpt2",
-            "Reference": "https://huggingface.co/docs/transformers/model_doc/gpt2"
-        },
-        "EleutherAI GPT-Neo": {
-            "Name": "EleutherAI GPT-Neo",
-            "Model": "gpt-neo-2.7B",
-            "Url": "https://api-inference.huggingface.co/models/EleutherAI/gpt-neo-2.7B",
-            "Reference": "https://huggingface.co/EleutherAI/gpt-neo-2.7B"
-        },
-        "Cohere": {
-            "Name": "Cohere",
-            "Model": "large",
-            "Url": "https://api.cohere.ai/generate",
-            "Reference": "https://docs.cohere.com/docs/the-cohere-platform"
-        },
-        "Google T5": {
-            "Name": "Google T5",
-            "Model": "t5-small",
-            "Url": "https://api-inference.huggingface.co/models/t5-small",
-            "Reference": "https://huggingface.co/docs/transformers/model_doc/t5"
-        },
-        "BigScience BLOOM": {
-            "Name": "BigScience BLOOM",
-            "Model": "bloom",
-            "Url": "https://api-inference.huggingface.co/models/bigscience/bloom",
-            "Reference": "https://huggingface.co/bigscience/bloom"
-        },
-        "Falcon 40B": {
-            "Name": "Falcon 40B",
-            "Model": "falcon-40b",
-            "Url": "https://api-inference.huggingface.co/models/tiiuae/falcon-40b",
-            "Reference": "https://huggingface.co/tiiuae/falcon-40b"
-        },
-        "Gemma 7B": {
-            "Name": "Gemma 7B",
-            "Model": "gemma-7b",
-            "Url": "https://api-inference.huggingface.co/models/google/gemma-7b",
-            "Reference": "https://huggingface.co/google/gemma-7b"
-        },
-        "StarCoder": {
-            "Name": "StarCoder",
-            "Model": "starcoder",
-            "Url": "https://api-inference.huggingface.co/models/bigcode/starcoder",
-            "Reference": "https://huggingface.co/bigcode/starcoder"
-        },
-        "MPT-30B": {
-            "Name": "MPT-30B",
-            "Model": "mpt-30b",
-            "Url": "https://api-inference.huggingface.co/models/mosaicml/mpt-30b",
-            "Reference": "https://huggingface.co/mosaicml/mpt-30b"
-        },
-        "HuggingFaceH4 Zephyr-7B-Beta": {
-            "Name": "HuggingFaceH4 Zephyr-7B-Beta",
-            "Model": "zephyr-7b-beta",
-            "Url": "https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta",
-            "Reference": "https://huggingface.co/HuggingFaceH4/zephyr-7b-beta"
+        "Anthropic": {
+            "Name": "Anthropic",
+            "Model":"claude-3-5-sonnet-20240620",
+            "Url": "https://api.anthropic.com/v1/complete",
+            "Reference": "https://docs.anthropic.com/en/docs/welcome"
         }
     }
 }
