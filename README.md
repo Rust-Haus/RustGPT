@@ -176,11 +176,11 @@ Parameters
 
 I'm not associated in any way with OpenAI or Facepunch but feel free to tell them how cool I am.
 
-Huge thanks to Raul-Sorin Sorban for helping me getting this to work! He should be a co-author of the plugin but I am sparing him from the customer service requests. 😁
+Huge thanks to Raul for helping me getting this to work! He should be a co-author of the plugin but I am sparing him from the customer service requests. 😁
 
 # Feedback
 
-`goo@rust.haus`
+`https://discord.gg/EQNPBxdjRu`
 
 [Github Discussions](https://github.com/Rust-Haus/RustGPT/discussions)
 
