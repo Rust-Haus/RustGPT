@@ -11,71 +11,109 @@ using System.ComponentModel;
 using System.Runtime.Remoting.Channels;
 using System.Linq;
 using System.Security.Policy;
+using System.Text;
 
 #pragma warning disable SYSLIB0014
 
 namespace Oxide.Plugins
 {
-    [Info("RustGPT", "Goo_", "1.7.6")]
+    [Info("RustGPT", "Goo_", "1.7.7")]
     [Description("Players can use OpenAI's ChatGPT from the game chat, incudes ChatGPT color commentary for deaths.")]
     public class RustGPT : RustPlugin
     {
         #region Declarations
+
+        private const string PluginVersion = "1.7.7";
+        private readonly Version _version = new Version(PluginVersion);
+
         private string ApiKey => _config.OpenAI_Api_Key.ApiKey;
         private string ApiUrl => _config.OutboundAPIUrl.ApiUrl;
         private Regex _questionRegex { get; set; }
         private PluginConfig _config { get; set; }
-        private const string PluginVersion = "1.7.6";
-        private readonly Version _version = new Version(PluginVersion);
+
         private Dictionary<string, float> _lastUsageTime = new Dictionary<string, float>();
         private Dictionary<string, Uri> _uriCache = new Dictionary<string, Uri>();
 
         #endregion
 
         #region Overrides
+
         private void Init()
         {
+            // Register permissions
+            permission.RegisterPermission("RustGPT.use", this);
+            permission.RegisterPermission("RustGPT.admin", this);
 
-            permission.RegisterPermission("RustGPT.chat", this);
-
-            if (string.IsNullOrEmpty(ApiKey) || ApiKey == "your-api-key-here")
-            {
-                CheckOpenAIModel(ApiKey, _config.AIResponseParameters.Model, modelExists =>
-                {
-                    if (modelExists)
-                    {
-                        Puts($"Using OpenAI model: {_config.AIResponseParameters.Model}");
-                        return true;
-                    }
-                    else
-                    {
-                        Puts($"Model {_config.AIResponseParameters.Model} does not exist or you do not have access. Check your config file.");
-                        return false;
-                    }
-                });
-            }
+            // Test OpenAI configuration
+            TestOpenAIConfiguration();
 
             ShowPluginStatusToAdmins();
-
             cmd.AddChatCommand("models", this, nameof(ModelsCommand));
+        }
 
+        private void TestOpenAIConfiguration()
+        {
+            if (string.IsNullOrEmpty(ApiKey) || ApiKey == "your-api-key-here")
+            {
+                PrintError("API key is not configured. Please set a valid API key in the config file.");
+                NotifyAdminsOfApiKeyRequirement();
+                return;
+            }
 
+            // Test API connection with current model
+            ListAvailableModels(ApiKey, modelIds =>
+            {
+                bool modelExists = modelIds.Contains(_config.AIResponseParameters.Model);
+                if (!modelExists)
+                {
+                    PrintWarning($"Current model '{_config.AIResponseParameters.Model}' is not available.");
+                    GetSuggestedModel(suggestedModel =>
+                    {
+                        if (!string.IsNullOrEmpty(suggestedModel))
+                        {
+                            string oldModel = _config.AIResponseParameters.Model;
+                            _config.AIResponseParameters.Model = suggestedModel;
+                            Config.WriteObject(_config, true);
+                            Puts($"Updated to suggested model: {suggestedModel}");
+                            NotifyAdminsOfModelUpdate(oldModel, suggestedModel);
+                        }
+                        else
+                        {
+                            PrintError("Failed to get suggested model. Please check your configuration.");
+                        }
+                    });
+                }
+                else
+                {
+                    Puts($"OpenAI configuration test successful. Using model: {_config.AIResponseParameters.Model}");
+                }
+            });
         }
 
         protected override void LoadDefaultConfig()
         {
             Puts("Creating a new configuration file.");
-            _config = new PluginConfig { PluginVersion = PluginVersion };
+            _config = new PluginConfig 
+            { 
+                PluginVersion = PluginVersion,
+                ChatSettings = new ChatMessageConfig()
+            };
             Config.WriteObject(_config, true);
         }
+
 
         protected override void LoadConfig()
         {
             base.LoadConfig();
-
             try
             {
                 _config = Config.ReadObject<PluginConfig>();
+                
+                // Initialize ChatSettings if it's null (for older configs)
+                if (_config.ChatSettings == null)
+                {
+                    _config.ChatSettings = new ChatMessageConfig();
+                }
             }
             catch (Exception ex)
             {
@@ -89,82 +127,231 @@ namespace Oxide.Plugins
                 NotifyAdminsOfApiKeyRequirement();
             }
 
+            // Migrate config if version mismatch
             if (_config.PluginVersion != PluginVersion)
             {
                 MigrateConfig(_config);
             }
 
+            // Compile question regex
             _questionRegex = new Regex(_config.QuestionPattern, RegexOptions.IgnoreCase);
-
-
-
         }
+
         #endregion
 
         #region User_Chat
+
         private void OnPlayerChat(BasePlayer player, string user_chat_question)
         {
-            if (_questionRegex.IsMatch(user_chat_question) && permission.UserHasPermission(player.UserIDString, "RustGPT.chat"))
+            // Check if user message matches our configured pattern and if they have permission
+            if (_questionRegex.IsMatch(user_chat_question) && permission.UserHasPermission(player.UserIDString, "RustGPT.use"))
             {
                 if (!HasCooldownElapsed(player))
                 {
                     return;
                 }
+
+                // Validate API key
+                if (string.IsNullOrEmpty(ApiKey) || ApiKey == "your-api-key-here" || !ApiKey.StartsWith("sk-"))
+                {
+                    player.ChatMessage("The API key is not properly configured. Please contact an administrator.");
+                    return;
+                }
+
+                // Clean up user question
                 string cleaned_chat_question = !string.IsNullOrEmpty(_config.QuestionPattern)
                     ? user_chat_question.Replace(_config.QuestionPattern, "").Trim()
                     : user_chat_question;
-                string system_prompt = $"{_config.AIPromptParameters.UserServerDetails}";
-                RustGPTHook(ApiKey,
-                    new
-                    {
-                        model = _config.AIResponseParameters.Model,
-                        messages = new[]
+
+                // Combine system role + user server details
+                string system_prompt = $"{_config.AIPromptParameters.SystemRole}\n{_config.AIPromptParameters.UserServerDetails}";
+
+
+
+                try
+                {
+                    // Send to OpenAI
+                    RustGPTHook(ApiKey,
+                        new
                         {
-                            new {role = "system", content= system_prompt},
-                            new {role = "user", content = cleaned_chat_question}
+                            model = _config.AIResponseParameters.Model,
+                            messages = new[]
+                            {
+                                new { role = "developer", content = new[] { new { type = "text", text = system_prompt } } },
+                                new { role = "user", content = new[] { new { type = "text", text = cleaned_chat_question } } }
+                            },
+                            temperature = _config.AIResponseParameters.Temperature,
+                            max_tokens = _config.AIResponseParameters.MaxTokens,
+                            presence_penalty = _config.AIResponseParameters.PresencePenalty,
+                            frequency_penalty = _config.AIResponseParameters.FrequencyPenalty
                         },
-                        temperature = _config.AIResponseParameters.Temperature,
-                        max_tokens = _config.AIResponseParameters.MaxTokens,
-                        presence_penalty = _config.AIResponseParameters.PresencePenalty,
-                        frequency_penalty = _config.AIResponseParameters.FrequencyPenalty
-                    },
-                    ApiUrl,
-                    response =>
-                    {
-                        string customPrefix = $"<color={_config.ResponsePrefixColor}>{_config.ResponsePrefix}</color>";
-                        string GPT_Chat_Reply = response["choices"][0]["message"]["content"].ToString().Trim();
-                        string toChat = $"{customPrefix} {GPT_Chat_Reply}";
+                        ApiUrl,
+                        response =>
+                        {
+                            try
+                            {
+                                if (response == null)
+                                {
+                                    player.ChatMessage("Received no response from AI. Please try again.");
+                                    PrintError("Received null response from API");
+                                    return;
+                                }
 
-                        if (_config.OptionalPlugins.UseDiscordWebhookChat)
-                        {
-                            var discordPayload = $"**{player}** \n> {cleaned_chat_question}.\n**{_config.ResponsePrefix}** \n> {GPT_Chat_Reply}";
-                            SendDiscordMessage(discordPayload);
-                        }
+                                if (response["error"] != null)
+                                {
+                                    player.ChatMessage("An error occurred. Please try again later.");
+                                    PrintError($"OpenAI API Error: {response["error"]["message"]}");
+                                    return;
+                                }
 
-                        if (_config.BroadcastResponse)
-                        {
-                            Server.Broadcast(toChat);
-                        }
-                        else
-                        {
-                            SendChatMessageInChunks(player, toChat, 250);
-                        }
-                    });
+                                if (response["choices"] == null || !response["choices"].HasValues)
+                                {
+                                    player.ChatMessage("Received invalid response. Please try again.");
+                                    PrintError("No choices in response");
+                                    return;
+                                }
+
+                                string customPrefix = $"<color={_config.ResponsePrefixColor}>{_config.ResponsePrefix}</color>";
+                                string GPT_Chat_Reply = response["choices"][0]["message"]["content"].ToString().Trim();
+                                string formattedReply = $"<color={_config.ChatSettings.ChatMessageColor}><size={_config.ChatSettings.ChatMessageFontSize}>{GPT_Chat_Reply}</size></color>";
+                                string toChat = $"{customPrefix} {formattedReply}";
+
+                                if (_config.OptionalPlugins.UseDiscordWebhookChat)
+                                {
+                                    var discordPayload = $"**{player}** \n> {cleaned_chat_question}.\n**{_config.ResponsePrefix}** \n> {GPT_Chat_Reply}";
+                                    SendDiscordMessage(discordPayload);
+                                }
+
+                                if (_config.BroadcastResponse)
+                                {
+                                    Server.Broadcast(toChat);
+                                }
+                                else
+                                {
+                                    SendChatMessageInChunks(player, toChat, 450);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                player.ChatMessage("Error processing AI response. Please try again.");
+                                PrintError($"Error processing API response: {ex.Message}");
+                            }
+                        });
+                }
+                catch (Exception ex)
+                {
+                    player.ChatMessage("Error sending message to AI. Please try again.");
+                    PrintError($"Error sending chat message to OpenAI: {ex.Message}");
+                }
             }
             else if (_questionRegex.IsMatch(user_chat_question))
             {
+                // They matched !gpt but don't have permission
                 PrintError($"{player.displayName} does not have permission to use RustGPT.");
             }
         }
 
+
         private void SendChatMessageInChunks(BasePlayer player, string message, int chunkSize)
         {
-            for (int i = 0; i < message.Length; i += chunkSize)
+            // Standardize chunk size to 450 for better reliability
+            const int STANDARD_CHUNK_SIZE = 450;
+            string formatStart = $"<color={_config.ChatSettings.ChatMessageColor}><size={_config.ChatSettings.ChatMessageFontSize}>";
+            string formatEnd = "</size></color>";
+
+            // Split message into chunks at sentence boundaries
+            List<string> chunks = SplitIntoSmartChunks(message, STANDARD_CHUNK_SIZE);
+
+            // Send first chunk immediately
+            if (chunks.Count > 0)
             {
-                string chunk = message.Substring(i, Math.Min(chunkSize, message.Length - i));
-                player.ChatMessage(chunk);
+                player.ChatMessage(chunks[0]);
+            }
+
+            // Schedule remaining chunks with delay
+            if (chunks.Count > 1)
+            {
+                timer.Once(0.5f, () => SendRemainingChunks(player, chunks.Skip(1).ToList(), formatStart, formatEnd, 0));
             }
         }
+
+        private List<string> SplitIntoSmartChunks(string text, int maxChunkSize)
+        {
+            List<string> chunks = new List<string>();
+            string[] sentences = text.Split(new[] { ". ", "! ", "? ", ".\n", "!\n", "?\n" }, StringSplitOptions.RemoveEmptyEntries);
+            
+            StringBuilder currentChunk = new StringBuilder();
+            
+            foreach (string sentence in sentences)
+            {
+                string sentenceWithPunctuation = sentence.TrimEnd() + ". ";
+                
+                // If adding this sentence would exceed the chunk size
+                if (currentChunk.Length + sentenceWithPunctuation.Length > maxChunkSize)
+                {
+                    // If the current chunk is not empty, add it to chunks
+                    if (currentChunk.Length > 0)
+                    {
+                        chunks.Add(currentChunk.ToString().TrimEnd());
+                        currentChunk.Clear();
+                    }
+                    
+                    // If the sentence itself is longer than maxChunkSize, split it at word boundaries
+                    if (sentenceWithPunctuation.Length > maxChunkSize)
+                    {
+                        string[] words = sentenceWithPunctuation.Split(' ');
+                        StringBuilder wordChunk = new StringBuilder();
+                        
+                        foreach (string word in words)
+                        {
+                            if (wordChunk.Length + word.Length + 1 > maxChunkSize)
+                            {
+                                chunks.Add(wordChunk.ToString().TrimEnd());
+                                wordChunk.Clear();
+                            }
+                            wordChunk.Append(word).Append(" ");
+                        }
+                        
+                        if (wordChunk.Length > 0)
+                        {
+                            currentChunk.Append(wordChunk);
+                        }
+                    }
+                    else
+                    {
+                        currentChunk.Append(sentenceWithPunctuation);
+                    }
+                }
+                else
+                {
+                    currentChunk.Append(sentenceWithPunctuation);
+                }
+            }
+            
+            // Add any remaining text
+            if (currentChunk.Length > 0)
+            {
+                chunks.Add(currentChunk.ToString().TrimEnd());
+            }
+            
+            return chunks;
+        }
+
+        private void SendRemainingChunks(BasePlayer player, List<string> chunks, string formatStart, string formatEnd, int currentIndex)
+        {
+            if (currentIndex >= chunks.Count || !player.IsConnected)
+                return;
+
+            // Send current chunk with formatting
+            player.ChatMessage($"{formatStart}{chunks[currentIndex]}{formatEnd}");
+
+            // Schedule next chunk if there are more
+            if (currentIndex + 1 < chunks.Count)
+            {
+                timer.Once(0.5f, () => SendRemainingChunks(player, chunks, formatStart, formatEnd, currentIndex + 1));
+            }
+        }
+
         #endregion
 
         #region Death_Commentary
@@ -174,15 +361,17 @@ namespace Oxide.Plugins
             if (!_config.OptionalPlugins.UseDeathComment || entity == null || info == null) return;
 
             BasePlayer victim = entity.ToPlayer();
-            BasePlayer attacker = info.InitiatorPlayer;
+            BasePlayer attacker = info?.InitiatorPlayer;
 
-            if (victim != null && !(victim is NPCPlayer) && attacker != null && !(attacker is NPCPlayer))
+            // Only proceed if we have both a valid victim and attacker, and neither is an NPC
+            if (victim == null || victim is NPCPlayer || attacker == null || attacker is NPCPlayer) return;
+
+            try
             {
-                string attackerName = StripRichText(attacker.displayName);
-                string victimName = StripRichText(victim.displayName);
-
-                string weaponName = GetWeaponDisplayName(attacker);
-                string hitBone = GetHitBone(info);
+                string attackerName = StripRichText(attacker.displayName ?? "Unknown");
+                string victimName = StripRichText(victim.displayName ?? "Unknown");
+                string weaponName = GetWeaponDisplayName(attacker) ?? "unknown weapon";
+                string hitBone = GetHitBone(info) ?? "body";
 
                 string deathMessage = $"{attackerName} killed {victimName} with a {weaponName} in the {hitBone}";
 
@@ -192,45 +381,21 @@ namespace Oxide.Plugins
                     int killMessageFontSize = _config.DeathNoteSettings.KillMessageFontSize;
 
                     string formattedMessagePart = $"<color={killMessageColor}><size={killMessageFontSize}>{deathMessage}</size></color>";
-
-
                     Server.Broadcast(formattedMessagePart);
                 }
+
                 if (_config.OptionalPlugins.UseDiscordWebhookChat)
                 {
-
                     SendDiscordMessage(deathMessage);
                 }
 
+                // Send to OpenAI for color commentary
                 SendDeathMessageToOpenAI(deathMessage);
-
             }
-        }
-
-        private string GetEntityName(BaseCombatEntity entity)
-        {
-
-            if (entity is BasePlayer player)
+            catch (Exception ex)
             {
-                return StripRichText(player.displayName);
+                PrintError($"Error processing death event: {ex.Message}");
             }
-            else if (entity is NPCPlayer)
-            {
-                if (entity.ShortPrefabName.Contains("scientist"))
-                {
-                    return "Scientist";
-                }
-            }
-            else if (entity is BaseAnimalNPC)
-            {
-                return entity.ShortPrefabName;
-            }
-            else if (entity is BaseHelicopter)
-            {
-                return "Helicopter";
-            }
-
-            return "an unknown entity";
         }
 
         private string StripRichText(string text)
@@ -240,99 +405,119 @@ namespace Oxide.Plugins
 
         private string GetHitBone(HitInfo info)
         {
-            if (info.HitEntity == null || info.HitEntity.ToPlayer() == null) return "";
-
-            string hitBone;
-
-            BaseCombatEntity hitEntity = info.HitEntity as BaseCombatEntity;
-
-            SkeletonProperties.BoneProperty boneProperty = hitEntity.skeletonProperties?.FindBone(info.HitBone);
-
-            string bone = boneProperty?.name?.english ?? "";
-
-            return bone;
-        }
-
-        private string CreateDeathMessage(BasePlayer victim, BasePlayer attacker, HitInfo info)
-        {
-            string weaponDisplayName = GetWeaponDisplayName(attacker);
-            string bodyPart = GetHitBone(info);
-            bool isHeadshot = info.isHeadshot;
-
-            string deathMessage = $"{attacker.displayName} killed {victim.displayName} with a {weaponDisplayName}";
-
-            if (!string.IsNullOrEmpty(bodyPart))
+            try
             {
-                deathMessage += $" by hitting their {bodyPart}";
-            }
+                if (info?.HitEntity == null || !(info.HitEntity is BaseCombatEntity)) return "body";
 
-            if (isHeadshot)
+                BaseCombatEntity hitEntity = info.HitEntity as BaseCombatEntity;
+                if (hitEntity?.skeletonProperties == null) return "body";
+
+                SkeletonProperties.BoneProperty boneProperty = hitEntity.skeletonProperties.FindBone(info.HitBone);
+                return boneProperty?.name?.english ?? "body";
+            }
+            catch (Exception ex)
             {
-                deathMessage += " (headshot)";
+                PrintError($"Error getting hit bone: {ex.Message}");
+                return "body";
             }
-
-            return deathMessage;
         }
 
         private string GetWeaponDisplayName(BasePlayer attacker)
         {
-            if (attacker != null && attacker.GetActiveItem() != null)
+            try
             {
-                Item activeItem = attacker.GetActiveItem();
-                return activeItem.info.displayName.translated;
-            }
-
-            return "unknown";
-        }
-
-        private ItemDefinition GetItemDefinitionFromEntity(BaseEntity entity)
-        {
-            if (entity != null)
-            {
-                Item item = entity.GetComponent<Item>();
-
-                if (item != null)
+                if (attacker?.GetActiveItem()?.info != null)
                 {
-                    return item.info;
+                    return attacker.GetActiveItem().info.displayName.translated;
                 }
             }
-
-            return null;
+            catch (Exception ex)
+            {
+                PrintError($"Error getting weapon name: {ex.Message}");
+            }
+            return "unknown weapon";
         }
 
         private void SendDeathMessageToOpenAI(string deathMessage)
         {
-            RustGPTHook(ApiKey,
-                new
+            // Skip if API key is invalid or empty
+            if (string.IsNullOrEmpty(ApiKey) || ApiKey == "your-api-key-here" || !ApiKey.StartsWith("sk-"))
+            {
+                if (_config.OptionalPlugins.UseDeathComment)
                 {
-                    model = _config.AIResponseParameters.Model,
-                    messages = new[]
-                    {
-                        new { role = "system", content = _config.OptionalPlugins.DeathCommentaryPrompt },
-                        new { role = "user", content = deathMessage }
-                    },
-                    temperature = _config.AIResponseParameters.Temperature,
-                    max_tokens = _config.AIResponseParameters.MaxTokens,
-                    presence_penalty = _config.AIResponseParameters.PresencePenalty,
-                    frequency_penalty = _config.AIResponseParameters.FrequencyPenalty
-                },
-                ApiUrl,
-                response =>
-                {
-                    string GPT_Chat_Reply = response["choices"][0]["message"]["content"].ToString().Trim();
+                    PrintWarning("Death commentary is enabled but OpenAI API key is invalid or not set. Death commentary will be disabled.");
+                    _config.OptionalPlugins.UseDeathComment = false;
+                    Config.WriteObject(_config, true);
+                }
+                return;
+            }
 
-                    BroadcastDeathNote(GPT_Chat_Reply);
-                });
+            // Combine system role + rude kill commentary prompt
+            string systemPromptForDeath = $"{_config.OptionalPlugins.DeathCommentaryPrompt}";
+
+            try
+            {
+                RustGPTHook(ApiKey,
+                    new
+                    {
+                        model = _config.AIResponseParameters.Model,
+                        messages = new[]
+                        {
+                            new { role = "developer", content = new[] { new { type = "text", text = systemPromptForDeath } } },
+                            new { role = "user", content = new[] { new { type = "text", text = deathMessage } } }
+                        },
+                        temperature = _config.AIResponseParameters.Temperature,
+                        max_tokens = _config.AIResponseParameters.MaxTokens,
+                        presence_penalty = _config.AIResponseParameters.PresencePenalty,
+                        frequency_penalty = _config.AIResponseParameters.FrequencyPenalty
+                    },
+                    ApiUrl,
+                    response =>
+                    {
+                        try
+                        {
+                            if (response == null)
+                            {
+                                PrintError("Received null response from API");
+                                return;
+                            }
+
+                            if (response["error"] != null)
+                            {
+                                PrintError($"OpenAI API Error: {response["error"]["message"]}");
+                                return;
+                            }
+
+                            if (response["choices"] == null || !response["choices"].HasValues)
+                            {
+                                PrintError("No choices in response");
+                                return;
+                            }
+
+                            string GPT_Chat_Reply = response["choices"][0]["message"]["content"].ToString().Trim();
+                            if (!string.IsNullOrEmpty(GPT_Chat_Reply))
+                            {
+                                BroadcastDeathNote(GPT_Chat_Reply);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            PrintError($"Error processing API response: {ex.Message}");
+                        }
+                    });
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Error sending death message to OpenAI: {ex.Message}");
+            }
         }
 
         private void BroadcastDeathNote(string message)
         {
-            const int MaxMessageLength = 500; // I left this out of the config since this is more of a steam thing more than a rust thing. I doubt steam will change their message sizes in the near future. 
             string killMessageColor = _config.DeathNoteSettings.KillMessageColor;
             int killMessageFontSize = _config.DeathNoteSettings.KillMessageFontSize;
 
-            var messageParts = SplitMessageIntoChunks(message, MaxMessageLength).ToList();
-
+            var messageParts = SplitIntoSmartChunks(message, 450);
             if (!messageParts.Any())
             {
                 return;
@@ -340,17 +525,8 @@ namespace Oxide.Plugins
 
             foreach (var messagePart in messageParts)
             {
-
                 string formattedMessagePart = $"<color={killMessageColor}><size={killMessageFontSize}>{messagePart}</size></color>";
                 Server.Broadcast(formattedMessagePart);
-            }
-        }
-
-        private IEnumerable<string> SplitMessageIntoChunks(string message, int chunkSize)
-        {
-            for (int i = 0; i < message.Length; i += chunkSize)
-            {
-                yield return message.Substring(i, Math.Min(chunkSize, message.Length - i));
             }
         }
 
@@ -378,7 +554,6 @@ namespace Oxide.Plugins
                     PrintError($"There was an issue with the API request. Check your API key and API Url. If problem persists, check your usage at OpenAI.", e.Error);
                     return;
                 }
-
                 callback(JObject.Parse(e.Result));
             };
 
@@ -393,6 +568,41 @@ namespace Oxide.Plugins
             webClient.UploadStringAsync(uri, "POST", JsonConvert.SerializeObject(payload));
         }
 
+        [HookMethod("GetSuggestedModel")]
+        public void GetSuggestedModel(Action<string> callback)
+        {
+            var webClient = new WebClient();
+            webClient.Headers.Add("Content-Type", "application/json");
+
+            webClient.DownloadStringCompleted += (sender, e) =>
+            {
+                if (e.Error != null)
+                {
+                    PrintError($"Error fetching suggested model: {e.Error.Message}");
+                    return;
+                }
+                try
+                {
+                    callback(e.Result.Trim());
+                }
+                catch (Exception ex)
+                {
+                    PrintError($"Error processing suggested model response: {ex.Message}");
+                }
+            };
+
+
+            try
+            {
+                var uri = new Uri("https://www.rust.haus/api/openai-suggested-model");
+                webClient.DownloadStringAsync(uri);
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Error initiating suggested model request: {ex.Message}");
+            }
+        }
+
         [HookMethod("ListAvailableModels")]
         public void ListAvailableModels(string apiKey, Action<List<string>> callback)
         {
@@ -401,15 +611,16 @@ namespace Oxide.Plugins
                 webClient.Headers.Add("Content-Type", "application/json");
                 webClient.Headers.Add("Authorization", $"Bearer {apiKey}");
                 string url = "https://api.openai.com/v1/models";
+
                 try
                 {
                     string response = webClient.DownloadString(url);
-
                     if (response == null)
                     {
                         Puts("Something went wrong retrieving the model list.");
                         return;
                     }
+
                     JObject jsonResponse = JObject.Parse(response);
                     JToken models;
                     if (jsonResponse.TryGetValue("data", out models) && models is JArray modelsArray)
@@ -440,11 +651,12 @@ namespace Oxide.Plugins
                 }
             }
         }
+
         private void ModelsCommand(BasePlayer player, string command, string[] args)
         {
-            if (player.net.connection.authLevel < 2)
+            if (!permission.UserHasPermission(player.UserIDString, "RustGPT.admin"))
             {
-                player.ChatMessage("You must have auth level 2 to use this command.");
+                player.ChatMessage("You don't have permission to use this command.");
                 return;
             }
 
@@ -463,7 +675,6 @@ namespace Oxide.Plugins
                 {
                     SendDiscordMessage(models);
                 }
-
             });
         }
 
@@ -473,9 +684,36 @@ namespace Oxide.Plugins
             ListAvailableModels(apiKey, modelIds =>
             {
                 bool modelExists = modelIds.Contains(model);
+                if (!modelExists)
+                {
+                    // If model doesn't exist, get suggested model
+                    GetSuggestedModel(suggestedModel =>
+                    {
+                        if (!string.IsNullOrEmpty(suggestedModel))
+                        {
+                            string oldModel = _config.AIResponseParameters.Model;
+                            _config.AIResponseParameters.Model = suggestedModel;
+                            Config.WriteObject(_config, true);
+                            Puts($"Updated to suggested model: {suggestedModel}");
+                            NotifyAdminsOfModelUpdate(oldModel, suggestedModel);
+                        }
+                    });
+                }
                 callback(modelExists);
             });
         }
+
+        private void NotifyAdminsOfModelUpdate(string oldModel, string newModel)
+        {
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                if (permission.UserHasPermission(player.UserIDString, "RustGPT.admin"))
+                {
+                    player.ChatMessage($"[RustGPT] Model updated from '{oldModel}' to '{newModel}' based on API availability.");
+                }
+            }
+        }
+
 
         #endregion
 
@@ -485,10 +723,9 @@ namespace Oxide.Plugins
         {
             foreach (var player in BasePlayer.activePlayerList)
             {
-                if (permission.UserHasPermission(player.UserIDString, "RustGPT.chat") && player.net.connection.authLevel >= 2)
+                if (permission.UserHasPermission(player.UserIDString, "RustGPT.admin"))
                 {
-                    string statusMessage = "RustGPT Plugin is active. Use /rustgptfeedback for suggestions and/or problems.\n";
-
+                    string statusMessage = "RustGPT Plugin is active.\n";
                     statusMessage += "Using model: " + _config.AIResponseParameters.Model + "\n";
 
                     if (_config.OptionalPlugins.UseDiscordWebhookChat)
@@ -514,14 +751,13 @@ namespace Oxide.Plugins
             }
         }
 
+
         private bool HasCooldownElapsed(BasePlayer player)
         {
             float lastUsageTime;
-
             if (_lastUsageTime.TryGetValue(player.UserIDString, out lastUsageTime))
             {
                 float elapsedTime = Time.realtimeSinceStartup - lastUsageTime;
-
                 if (elapsedTime < _config.CooldownInSeconds)
                 {
                     float timeLeft = _config.CooldownInSeconds - elapsedTime;
@@ -538,7 +774,7 @@ namespace Oxide.Plugins
         {
             foreach (var player in BasePlayer.activePlayerList)
             {
-                if (permission.UserHasPermission(player.UserIDString, "RustGPT.use"))
+                if (permission.UserHasPermission(player.UserIDString, "RustGPT.admin"))
                 {
                     player.ChatMessage("The RustGPT API key is not set in the configuration file.");
                 }
@@ -548,22 +784,19 @@ namespace Oxide.Plugins
         private void SendDiscordMessage(string message)
         {
             string goMessage = $"`{ConVar.Server.hostname}`\n{message}\n";
-
             using (WebClient webClient = new WebClient())
             {
                 webClient.Headers[HttpRequestHeader.ContentType] = "application/json";
-
                 var payload = new { content = goMessage };
                 var serializedPayload = JsonConvert.SerializeObject(payload);
-
-                var response = webClient.UploadString(_config.OptionalPlugins.DiscordWebhookChatUrl, "POST", serializedPayload);
-
+                webClient.UploadString(_config.OptionalPlugins.DiscordWebhookChatUrl, "POST", serializedPayload);
             }
         }
 
         #endregion
 
         #region Config
+
         private class OpenAI_Api_KeyConfig
         {
             [JsonProperty("OpenAI API Key")]
@@ -597,7 +830,7 @@ namespace Oxide.Plugins
             public AIPromptParametersConfig()
             {
                 SystemRole = "You are a helpful assistant on Rust game server called Rust.Haus Testing Server.";
-                UserServerDetails = "Server wipes Thursdays at 2pm CST. Blueprints are wiped on forced wipes only. Gather rate is 5X. Available commands available by using /info. Server admin is Goo. The discord link is https://discord.gg/EQNPBxdjRu";
+                UserServerDetails = "Server wipes Thursdays at 2pm CST. Blueprints are wiped on forced wipes only. Gather rate is 5X. Available commands with /info. Admin is Goo. Discord: https://discord.gg/EQNPBxdjRu";
             }
         }
 
@@ -620,11 +853,11 @@ namespace Oxide.Plugins
 
             public AIResponseParametersConfig()
             {
-                Model = "gpt-3.5-turbo";
+                Model = "gpt-4o-mini";
                 Temperature = 0.9;
-                MaxTokens = 150;
+                MaxTokens = 1000;  // Increased from 200 to allow longer responses
                 PresencePenalty = 0.6;
-                FrequencyPenalty = 0;
+                FrequencyPenalty = 0.2;
             }
         }
 
@@ -649,12 +882,10 @@ namespace Oxide.Plugins
             {
                 UseDiscordWebhookChat = false;
                 DiscordWebhookChatUrl = "https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks";
-                UseDeathComment = false;
+                UseDeathComment = true;
                 DeathCommentaryPrompt = "You are an extremely rude color commentator on the hottest new deathmatch show of the future. You use profanity and make fun of the people involved.";
                 SteamApiKey = "get-your-steam-api-key-here(https://steamcommunity.com/dev/apikey)";
-
             }
-
         }
 
         private class DeathNoteConfig
@@ -669,6 +900,21 @@ namespace Oxide.Plugins
             public bool ShowSimpleKillFeed { get; set; } = false;
         }
 
+        private class ChatMessageConfig
+        {
+            [JsonProperty("Chat Message Color")]
+            public string ChatMessageColor { get; set; }
+
+            [JsonProperty("Chat Message Font Size")]
+            public int ChatMessageFontSize { get; set; }
+
+            public ChatMessageConfig()
+            {
+                ChatMessageColor = "#FFFFFF";
+                ChatMessageFontSize = 12;
+            }
+        }
+        
 
         private class PluginConfig
         {
@@ -678,7 +924,7 @@ namespace Oxide.Plugins
             public AIPromptParametersConfig AIPromptParameters { get; set; }
             public OptionalPluginsConfig OptionalPlugins { get; set; }
             public DeathNoteConfig DeathNoteSettings { get; set; }
-
+            public ChatMessageConfig ChatSettings { get; set; }
 
             [JsonProperty("Response Prefix")]
             public string ResponsePrefix { get; set; }
@@ -698,8 +944,6 @@ namespace Oxide.Plugins
             [JsonProperty("Chat cool down in seconds")]
             public int CooldownInSeconds { get; set; }
 
-
-
             public PluginConfig()
             {
                 OpenAI_Api_Key = new OpenAI_Api_KeyConfig();
@@ -713,7 +957,7 @@ namespace Oxide.Plugins
                 BroadcastResponse = false;
                 CooldownInSeconds = 10;
                 DeathNoteSettings = new DeathNoteConfig();
-
+                ChatSettings = new ChatMessageConfig();
             }
         }
 
@@ -721,51 +965,60 @@ namespace Oxide.Plugins
         {
             Puts($"Updating configuration file to version {PluginVersion}");
 
-            _config.OpenAI_Api_Key = oldConfig.OpenAI_Api_Key;
-            _config.OutboundAPIUrl = oldConfig.OutboundAPIUrl;
-            _config.ResponsePrefix = oldConfig.ResponsePrefix;
-            _config.ResponsePrefixColor = oldConfig.ResponsePrefixColor;
-            _config.BroadcastResponse = oldConfig.BroadcastResponse;
-            _config.QuestionPattern = oldConfig.QuestionPattern;
-            _config.BroadcastResponse = oldConfig.BroadcastResponse;
-            _config.CooldownInSeconds = oldConfig.CooldownInSeconds;
+            var newConfig = new PluginConfig();
 
-            _config.AIResponseParameters = new AIResponseParametersConfig
+            // Copy existing settings
+            newConfig.OpenAI_Api_Key = oldConfig.OpenAI_Api_Key;
+            newConfig.OutboundAPIUrl = oldConfig.OutboundAPIUrl;
+            newConfig.ResponsePrefix = oldConfig.ResponsePrefix;
+            newConfig.ResponsePrefixColor = oldConfig.ResponsePrefixColor;
+            newConfig.BroadcastResponse = oldConfig.BroadcastResponse;
+            newConfig.QuestionPattern = oldConfig.QuestionPattern;
+            newConfig.CooldownInSeconds = oldConfig.CooldownInSeconds;
+
+            newConfig.AIResponseParameters = new AIResponseParametersConfig
             {
-                Model = oldConfig.AIResponseParameters.Model,
-                Temperature = oldConfig.AIResponseParameters.Temperature,
-                MaxTokens = oldConfig.AIResponseParameters.MaxTokens,
-                PresencePenalty = oldConfig.AIResponseParameters.PresencePenalty,
-                FrequencyPenalty = oldConfig.AIResponseParameters.FrequencyPenalty
+                Model = oldConfig.AIResponseParameters?.Model ?? "gpt-4o-mini",
+                Temperature = oldConfig.AIResponseParameters?.Temperature ?? 0.9,
+                MaxTokens = oldConfig.AIResponseParameters?.MaxTokens ?? 200,
+                PresencePenalty = oldConfig.AIResponseParameters?.PresencePenalty ?? 0.6,
+                FrequencyPenalty = oldConfig.AIResponseParameters?.FrequencyPenalty ?? 0.2
             };
 
-            _config.AIPromptParameters = new AIPromptParametersConfig
+            newConfig.AIPromptParameters = new AIPromptParametersConfig
             {
-                SystemRole = oldConfig.AIPromptParameters.SystemRole,
-                UserServerDetails = oldConfig.AIPromptParameters.UserServerDetails
+                SystemRole = oldConfig.AIPromptParameters?.SystemRole ?? "You are a helpful assistant.",
+                UserServerDetails = oldConfig.AIPromptParameters?.UserServerDetails ?? string.Empty
             };
 
-            _config.OptionalPlugins = new OptionalPluginsConfig
+            newConfig.OptionalPlugins = new OptionalPluginsConfig
             {
-                DiscordWebhookChatUrl = oldConfig.OptionalPlugins.DiscordWebhookChatUrl,
-                UseDiscordWebhookChat = oldConfig.OptionalPlugins.UseDiscordWebhookChat,
-                UseDeathComment = oldConfig.OptionalPlugins.UseDeathComment,
-                DeathCommentaryPrompt = oldConfig.OptionalPlugins.DeathCommentaryPrompt,
-                SteamApiKey = oldConfig.OptionalPlugins.SteamApiKey,
+                DiscordWebhookChatUrl = oldConfig.OptionalPlugins?.DiscordWebhookChatUrl ?? "https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks",
+                UseDiscordWebhookChat = oldConfig.OptionalPlugins?.UseDiscordWebhookChat ?? false,
+                UseDeathComment = oldConfig.OptionalPlugins?.UseDeathComment ?? false,
+                DeathCommentaryPrompt = oldConfig.OptionalPlugins?.DeathCommentaryPrompt ?? "You are an extremely rude color commentator on the hottest new deathmatch show of the future. You use profanity and make fun of the people involved.",
+                SteamApiKey = oldConfig.OptionalPlugins?.SteamApiKey ?? "get-your-steAM-api-key-here(https://steamcommunity.com/dev/apikey)"
             };
 
-            _config.DeathNoteSettings = new DeathNoteConfig
+            newConfig.DeathNoteSettings = new DeathNoteConfig
             {
                 KillMessageColor = oldConfig.DeathNoteSettings?.KillMessageColor ?? "#ADD8E6",
                 KillMessageFontSize = oldConfig.DeathNoteSettings?.KillMessageFontSize ?? 12,
-                ShowSimpleKillFeed = oldConfig.DeathNoteSettings?.ShowSimpleKillFeed ?? false,
+                ShowSimpleKillFeed = oldConfig.DeathNoteSettings?.ShowSimpleKillFeed ?? false
             };
 
-            _config.PluginVersion = PluginVersion;
+            // Preserve existing ChatSettings or use defaults if not present
+            newConfig.ChatSettings = new ChatMessageConfig
+            {
+                ChatMessageColor = oldConfig.ChatSettings?.ChatMessageColor ?? "#FFFFFF",
+                ChatMessageFontSize = oldConfig.ChatSettings?.ChatMessageFontSize ?? 12
+            };
+
+            newConfig.PluginVersion = PluginVersion;
+            _config = newConfig;
             Config.WriteObject(_config, true);
         }
 
         #endregion
-
     }
 }
