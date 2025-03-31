@@ -1,0 +1,14 @@
+{
+    "OpenAI": {
+        "API URL": "https://api.openai.com/v1/chat/completions",
+        "Model": "gpt-4o-mini"
+    },
+    "xAI": {
+        "API URL": "https://api.x.ai/v1/chat/completions",
+        "Model": "grok-2-latest"
+    },
+    "Anthropic": {
+        "API URL": "https://api.anthropic.com/v1/messages",
+        "Model": "claude-3-5-haiku-latest"
+    }
+}
