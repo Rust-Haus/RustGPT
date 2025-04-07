@@ -23,6 +23,10 @@
         "chat": {
             "url": "https://api.anthropic.com/v1/messages",
             "model": "claude-3-5-haiku-latest"
+        },
+        "image": {
+            "url": "not implemented",
+            "model": "not implemented"
         }
     }
 }
