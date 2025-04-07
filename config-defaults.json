@@ -1,14 +1,32 @@
 {
     "openai": {
-        "url": "https://api.openai.com/v1/chat/completions",
-        "model": "gpt-4o-mini"
+        "chat": {
+            "url": "https://api.openai.com/v1/chat/completions",
+            "model": "gpt-4o-mini"
+        },
+        "image": {
+            "url": "https://api.openai.com/v1/images/generations",
+            "model": "dall-e-3"
+        }
     },
     "xai": {
-        "url": "https://api.x.ai/v1/chat/completions",
-        "model": "grok-2-latest"
+        "chat": {
+            "url": "https://api.x.ai/v1/chat/completions",
+            "model": "grok-2-latest"
+        },
+        "image": {
+            "url": "https://api.x.ai/v1/images/generations",
+            "model": "grok-2-image"
+        }
     },
     "anthropic": {
-        "url": "https://api.anthropic.com/v1/messages",
-        "model": "claude-3-5-haiku-latest"
+        "chat": {
+            "url": "https://api.anthropic.com/v1/messages",
+            "model": "claude-3-5-haiku-latest"
+        },
+        "image": {
+            "url": "not implemented",
+            "model": "not implemented"
+        }
     }
 }
