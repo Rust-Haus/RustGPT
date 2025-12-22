@@ -6,23 +6,29 @@
         },
         "image": {
             "url": "https://api.openai.com/v1/images/generations",
-            "model": "dall-e-3"
+            "model": "dall-e-3",
+            "sizes": ["1024x1024", "1792x1024", "1024x1792"],
+            "qualities": ["standard", "hd"],
+            "styles": ["vivid", "natural"]
         }
     },
     "xai": {
         "chat": {
             "url": "https://api.x.ai/v1/chat/completions",
-            "model": "grok-2-latest"
+            "model": "grok-4-fast"
         },
         "image": {
             "url": "https://api.x.ai/v1/images/generations",
-            "model": "grok-2-image"
+            "model": "grok-2-image",
+            "sizes": ["1024x1024"],
+            "qualities": ["standard"],
+            "styles": ["vivid"]
         }
     },
     "anthropic": {
         "chat": {
             "url": "https://api.anthropic.com/v1/messages",
-            "model": "claude-3-5-haiku-latest"
+            "model": "claude-haiku-4-5"
         },
         "image": {
             "url": "not implemented",

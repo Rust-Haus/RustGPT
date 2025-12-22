@@ -11,15 +11,16 @@ using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
 using Oxide.Core.Plugins;
+using System.IO;
 
 namespace Oxide.Plugins
 {
-    [Info("RustGPT", "Goo_", "1.8.0")]
+    [Info("RustGPT", "Goo_", "1.9.0")]
     [Description("AI chat integration for Rust with support for OpenAI, Anthropic, and XAI. Players can interact with AI from game chat.")]
     public class RustGPT : RustPlugin
     {
         #region The good stuff.
-        private const string PluginVersion = "1.8.0";
+        private const string PluginVersion = "1.9.0";
 
         private Dictionary<string, IAIProvider> _providers;
         private IAIProvider _activeProvider;
@@ -28,6 +29,7 @@ namespace Oxide.Plugins
 
         private Dictionary<string, float> _lastUsageTime = new Dictionary<string, float>();
         private Dictionary<string, Uri> _uriCache = new Dictionary<string, Uri>();
+        private HashSet<string> _ignoredUsers = new HashSet<string>();
         #endregion
 
         #region Configuration Classes
@@ -328,6 +330,55 @@ namespace Oxide.Plugins
             });
 
             cmd.AddChatCommand("provider", this, nameof(ProviderCommand));
+            cmd.AddChatCommand("gptignore", this, nameof(IgnoreCommand));
+            
+            LoadIgnoredUsers();
+        }
+
+        private void LoadIgnoredUsers()
+        {
+            try
+            {
+                string dataDir = Path.Combine(ConVar.Server.rootFolder, "carbon", "data");
+                string filePath = Path.Combine(dataDir, Name + "_ignored.json");
+                if (File.Exists(filePath))
+                {
+                    string json = File.ReadAllText(filePath);
+                    _ignoredUsers = JsonConvert.DeserializeObject<HashSet<string>>(json);
+                    if (_ignoredUsers == null)
+                    {
+                        _ignoredUsers = new HashSet<string>();
+                    }
+                }
+                else
+                {
+                    _ignoredUsers = new HashSet<string>();
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Error loading ignored users: {ex.Message}");
+                _ignoredUsers = new HashSet<string>();
+            }
+        }
+
+        private void SaveIgnoredUsers()
+        {
+            try
+            {
+                string dataDir = Path.Combine(ConVar.Server.rootFolder, "carbon", "data");
+                if (!Directory.Exists(dataDir))
+                {
+                    Directory.CreateDirectory(dataDir);
+                }
+                string filePath = Path.Combine(dataDir, Name + "_ignored.json");
+                string json = JsonConvert.SerializeObject(_ignoredUsers, Formatting.Indented);
+                File.WriteAllText(filePath, json);
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Error saving ignored users: {ex.Message}");
+            }
         }
 
         private void InitializeProviders()
@@ -464,20 +515,32 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (string.IsNullOrEmpty(_config.ChatSettings.QuestionPattern))
+            if (_config.ChatSettings == null)
             {
+                _config.ChatSettings = new ChatMessageConfig();
+                Config.WriteObject(_config, true);
+            }
+            else if (_config.ChatSettings.QuestionPattern == null)
+            {
+                // Only set default if QuestionPattern was never set (null), not if it's an empty string (user's choice)
                 _config.ChatSettings.QuestionPattern = "!gpt";
                 Config.WriteObject(_config, true);
             }
 
-            _questionRegex = new Regex(_config.ChatSettings.QuestionPattern, RegexOptions.IgnoreCase);
+            _questionRegex = new Regex(_config.ChatSettings.QuestionPattern ?? "!gpt", RegexOptions.IgnoreCase);
         }
         #endregion
 
         #region Chat and Message Handling
         private object OnPlayerChat(BasePlayer player, string message, Chat.ChatChannel channel)
         {
-            if (channel != Chat.ChatChannel.Global || !_questionRegex.IsMatch(message))
+            if (channel != Chat.ChatChannel.Global)
+                return null;
+
+            if (_ignoredUsers.Contains(player.UserIDString))
+                return null;
+
+            if (!string.IsNullOrEmpty(_config.ChatSettings.QuestionPattern) && !_questionRegex.IsMatch(message))
                 return null;
 
             if (!permission.UserHasPermission(player.UserIDString, "RustGPT.use"))
@@ -964,6 +1027,25 @@ namespace Oxide.Plugins
 
             UpdateProvider(provider);
             player.ChatMessage($"<color=green>Successfully switched to {provider} provider.</color>");
+        }
+
+        private void IgnoreCommand(BasePlayer player, string command, string[] args)
+        {
+            string userId = player.UserIDString;
+            bool isIgnored = _ignoredUsers.Contains(userId);
+
+            if (isIgnored)
+            {
+                _ignoredUsers.Remove(userId);
+                SaveIgnoredUsers();
+                player.ChatMessage("<color=green>You are no longer ignoring RustGPT. The AI will now respond to your messages.</color>");
+            }
+            else
+            {
+                _ignoredUsers.Add(userId);
+                SaveIgnoredUsers();
+                player.ChatMessage("<color=yellow>You are now ignoring RustGPT. The AI will not respond to your messages. Use /gptignore again to re-enable.</color>");
+            }
         }
 
         private string GetProviderDescription(string provider)
