@@ -2,24 +2,24 @@
     "openai": {
         "chat": {
             "url": "https://api.openai.com/v1/chat/completions",
-            "model": "gpt-4o-mini"
+            "model": "gpt-5-nano"
         },
         "image": {
             "url": "https://api.openai.com/v1/images/generations",
-            "model": "dall-e-3",
-            "sizes": ["1024x1024", "1792x1024", "1024x1792"],
-            "qualities": ["standard", "hd"],
-            "styles": ["vivid", "natural"]
+            "model": "gpt-image-1-mini",
+            "sizes": ["1024x1024", "1536x1024", "1024x1536"],
+            "qualities": ["low", "medium", "high"],
+            "styles": []
         }
     },
     "xai": {
         "chat": {
             "url": "https://api.x.ai/v1/chat/completions",
-            "model": "grok-4-fast"
+            "model": "grok-4-1-fast-non-reasoning"
         },
         "image": {
             "url": "https://api.x.ai/v1/images/generations",
-            "model": "grok-2-image",
+            "model": "grok-imagine-image",
             "sizes": ["1024x1024"],
             "qualities": ["standard"],
             "styles": ["vivid"]
